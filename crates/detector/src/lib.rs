@@ -320,9 +320,10 @@ impl YoloDecoder {
             if box_dims.len() != 4 || cls_dims.len() != 4 {
                 continue;
             }
-            // Форма NCHW [1, C, Gh, Gw].
+            // Форма NCHW [1, C, Gh, Gw]: C — dims[1] (у box=64 канала DFL,
+            // у cls=Nc классов; H,W — dims[2],dims[3]).
             let (_, _bc, gh, gw) = (box_dims[0], box_dims[1], box_dims[2], box_dims[3]);
-            let (_, _cc, nc) = (cls_dims[0], cls_dims[1], cls_dims[2]);
+            let nc = cls_dims[1];
             let img_w = lb.target;
             let img_h = lb.target;
             let stride_h = (img_h / gh).max(1) as f32;

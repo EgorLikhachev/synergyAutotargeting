@@ -268,30 +268,36 @@ impl Runner {
                     while let Ok((rgb, w, h, seq)) = req_rx.recv() {
                         eprintln!("[DET] got request seq={seq} len={}", rgb.len());
                         let t0 = Instant::now();
-                        let (letterboxed, lb) =
-                            detector::letterbox_rgb24(&rgb, w, h, model.input_w.max(1));
-                        eprintln!("[DET] letterbox done, tensor {}x{}", model.input_w, model.input_h);
-                        match model.infer(&letterboxed) {
-                            Ok(outputs) => {
-                                let infer_us = t0.elapsed().as_micros();
-                                eprintln!("[DET] infer OK за {} mks, выходов={}", infer_us, outputs.len());
-                                let dets = decoder.decode(
-                                    &outputs,
-                                    &dims,
-                                    &lb,
-                                    w,
-                                    h,
-                                    seq,
+                        // Паника в инференсе/декоде не должна молча убивать
+                        // воркер (диагностика 2026-09-01): ловим и отвечаем Err.
+                        let lb_w = model.input_w.max(1);
+                        let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            let (letterboxed, lb) = detector::letterbox_rgb24(&rgb, w, h, lb_w);
+                            let outputs = model.infer(&letterboxed).map_err(|e| e.to_string())?;
+                            let dets = decoder.decode(&outputs, &dims, &lb, w, h, seq);
+                            Ok::<_, String>((dets, t0.elapsed().as_micros() as f32 / 1000.0))
+                        }));
+                        match res {
+                            Ok(Ok((dets, infer_ms))) => {
+                                eprintln!(
+                                    "[DET] OK seq={seq}: {} мс, детекций={}",
+                                    infer_ms,
+                                    dets.len()
                                 );
                                 let _ = resp_tx.send(Ok(DetectResult {
                                     detections: dets,
-                                    infer_ms: infer_us as f32 / 1000.0,
+                                    infer_ms,
                                     frame_seq: seq,
                                 }));
                             }
-                            Err(e) => {
+                            Ok(Err(e)) => {
                                 eprintln!("[DET] infer ERR: {e}");
                                 let _ = resp_tx.send(Err(format!("infer: {e}")));
+                            }
+                            Err(p) => {
+                                let msg = format!("panic в детекторе: {p:?}");
+                                eprintln!("[DET] {msg}");
+                                let _ = resp_tx.send(Err(msg));
                             }
                         }
                     }
