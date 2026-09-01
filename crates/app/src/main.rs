@@ -56,6 +56,10 @@ struct Args {
     /// Каталог вывода
     #[arg(short, long, default_value = None)]
     output: Option<String>,
+    /// Демо-режим: детекции подставляются в центре кадра (проверка трекинга
+    /// на реальных кадрах без распознаваемого моделью объекта)
+    #[arg(long)]
+    demo_detect: bool,
 }
 
 fn main() -> Result<()> {
@@ -78,7 +82,7 @@ fn main() -> Result<()> {
     }
     std::fs::create_dir_all(&cfg.output.dir).ok();
 
-    let run = Runner::new(cfg, args.synthetic)?;
+    let run = Runner::new(cfg, args.synthetic, args.demo_detect)?;
     run.run()
 }
 
@@ -118,11 +122,16 @@ struct RunStats {
 struct Runner {
     cfg: AppConfig,
     synthetic: bool,
+    demo_detect: bool,
 }
 
 impl Runner {
-    fn new(cfg: AppConfig, synthetic: bool) -> Result<Self> {
-        Ok(Self { cfg, synthetic })
+    fn new(cfg: AppConfig, synthetic: bool, demo_detect: bool) -> Result<Self> {
+        Ok(Self {
+            cfg,
+            synthetic,
+            demo_detect,
+        })
     }
 
     fn run(&self) -> Result<()> {
@@ -266,7 +275,7 @@ impl Runner {
                         "декодер YOLOv8 готов"
                     );
                     while let Ok((rgb, w, h, seq)) = req_rx.recv() {
-                        eprintln!("[DET] got request seq={seq} len={}", rgb.len());
+                        tracing::debug!(seq, "детектор получил запрос");
                         let t0 = Instant::now();
                         // Паника в инференсе/декоде не должна молча убивать
                         // воркер (диагностика 2026-09-01): ловим и отвечаем Err.
@@ -279,11 +288,7 @@ impl Runner {
                         }));
                         match res {
                             Ok(Ok((dets, infer_ms))) => {
-                                eprintln!(
-                                    "[DET] OK seq={seq}: {} мс, детекций={}",
-                                    infer_ms,
-                                    dets.len()
-                                );
+tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова");
                                 let _ = resp_tx.send(Ok(DetectResult {
                                     detections: dets,
                                     infer_ms,
@@ -291,12 +296,12 @@ impl Runner {
                                 }));
                             }
                             Ok(Err(e)) => {
-                                eprintln!("[DET] infer ERR: {e}");
+                                tracing::warn!(%e, "infer err");
                                 let _ = resp_tx.send(Err(format!("infer: {e}")));
                             }
                             Err(p) => {
                                 let msg = format!("panic в детекторе: {p:?}");
-                                eprintln!("[DET] {msg}");
+                                tracing::error!("{msg}");
                                 let _ = resp_tx.send(Err(msg));
                             }
                         }
@@ -330,27 +335,46 @@ impl Runner {
         track_ms: &mut f32,
         det_ms: &mut Option<f32>,
     ) -> Result<bool> {
-        // 1) Отправить кадр на детекцию, если пора и детектор свободен.
-        if seq % 30 == 0 {
-            eprintln!(
-                "[MAIN] seq={seq} inflight={} wants={}",
-                hybrid.detect_inflight,
-                hybrid.wants_detection(seq)
-            );
+        // Демо-режим: синтетическая детекция в центре кадра — проверка
+        // трекинга/гибрида на реальных кадрах (модель bkb видит только свой
+        // целевой класс, которого в лабораторной сцене нет).
+        if self.demo_detect && hybrid.wants_detection(seq) && !hybrid.detect_inflight {
+            let size = w.min(h) as f32 * 0.25;
+            let det = Detection {
+                bbox: common::BBox::new(
+                    w as f32 / 2.0 - size / 2.0,
+                    h as f32 / 2.0 - size / 2.0,
+                    size,
+                    size,
+                ),
+                class_id: 0,
+                class_name: "demo".into(),
+                confidence: 0.9,
+                frame_seq: seq,
+                detected_at_ms: 0,
+            };
+            stats.detections_run += 1;
+            stats.detect_us_total += 1000;
+            *det_ms = Some(1.0);
+            let img = Img::new(rgb.clone(), w, h);
+            let st = hybrid.on_detection(std::slice::from_ref(&det), &img);
+            if st.mode == Mode::DetectAcquire {
+                stats.reacquires += 1;
+            }
+            stats.detections_hits += 1;
         }
-        if hybrid.wants_detection(seq) && !hybrid.detect_inflight {
+
+        // 1) Отправить кадр на детекцию, если пора и детектор свободен.
+        if !self.demo_detect && hybrid.wants_detection(seq) && !hybrid.detect_inflight {
             if det_req_tx.try_send((rgb.clone(), w, h, seq)).is_ok() {
                 hybrid.detect_inflight = true;
                 stats.detections_run += 1;
-            } else {
-                eprintln!("[MAIN] try_send FAILED seq={seq}");
             }
         }
 
         // 2) Забрать результат детекции, если готов.
         if hybrid.detect_inflight {
             if let Ok(resp) = det_resp_rx.try_recv() {
-                eprintln!("[MAIN] got detection response at seq={seq}");
                 det_ms.take();
                 match resp {
                     Ok(r) => {
@@ -484,11 +508,17 @@ impl Runner {
                         break;
                     }
                 }
-                let frame = match rx.blocking_recv() {
-                    Some(f) => f,
-                    None => {
+                let frame = match rt.block_on(async {
+                    tokio::time::timeout(Duration::from_millis(500), rx.recv()).await
+                }) {
+                    Ok(Some(f)) => f,
+                    Ok(None) => {
                         tracing::warn!("источник кадров закрылся");
                         break;
+                    }
+                    Err(_) => {
+                        // таймаут: кадров нет 500 мс — проверяем флаги и ждём дальше
+                        continue;
                     }
                 };
                 let (w, h, seq) = (
