@@ -118,6 +118,7 @@ dependencies = [
  "detector",
  "jpeg-decoder",
  "jpeg-encoder",
+ "libc",
  "nano-track",
  "pipeline",
  "rknn-sys",

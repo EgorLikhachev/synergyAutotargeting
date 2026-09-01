@@ -7,8 +7,23 @@ mod osd;
 mod synthetic;
 
 use std::io::Write as _;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc as std_mpsc;
 use std::time::{Duration, Instant};
+
+/// Глобальный флаг остановки: SIGINT/SIGTERM → чистый STREAMOFF и итоги.
+static STOP: AtomicBool = AtomicBool::new(false);
+
+extern "C" fn on_signal(_sig: libc::c_int) {
+    STOP.store(true, Ordering::SeqCst);
+}
+
+fn install_signal_handlers() {
+    unsafe {
+        libc::signal(libc::SIGINT, on_signal as libc::sighandler_t);
+        libc::signal(libc::SIGTERM, on_signal as libc::sighandler_t);
+    }
+}
 
 use anyhow::{bail, Context, Result};
 use clap::Parser;
@@ -52,6 +67,7 @@ fn main() -> Result<()> {
         .init();
 
     let args = Args::parse();
+    install_signal_handlers();
     let mut cfg = AppConfig::load(&args.config)
         .with_context(|| format!("чтение {}", args.config))?;
     if let Some(d) = args.duration {
@@ -439,6 +455,10 @@ impl Runner {
             let (mut fps, mut track_ms, mut det_ms) = (0f32, 0f32, None);
             let mut fps_counter = FpsCounter::new();
             loop {
+                if STOP.load(Ordering::SeqCst) {
+                    tracing::info!("получен сигнал остановки");
+                    break;
+                }
                 if let Some(d) = deadline {
                     if Instant::now() >= d {
                         break;

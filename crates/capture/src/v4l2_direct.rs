@@ -232,22 +232,32 @@ impl VideoSource for V4l2DirectSource {
         );
 
         std::thread::spawn(move || {
-            let result = run_direct_capture(
-                &device_path,
-                width,
-                height,
-                fps,
-                fourcc,
-                format,
-                num_buffers,
-                tx,
-                stop_flag,
-            );
-            if let Err(e) = result {
-                error!(error = %e, "V4L2 direct capture thread exited with error");
-            } else {
-                info!("V4L2 direct capture thread exited cleanly");
+            // До 5 попыток полной переинициализации (камера может «залипать»
+            // после обрыва предыдущего клиента; poll-таймаут это детектит).
+            for attempt in 1..=5 {
+                if stop_flag.load(Ordering::SeqCst) {
+                    break;
+                }
+                let result = run_direct_capture(
+                    &device_path,
+                    width,
+                    height,
+                    fps,
+                    fourcc,
+                    format,
+                    num_buffers,
+                    tx.clone(),
+                    Arc::clone(&stop_flag),
+                );
+                match result {
+                    Ok(()) => break,
+                    Err(e) => {
+                        warn!(attempt, error = %e, "захват прерван, жду 1 с и переоткрываю");
+                        std::thread::sleep(std::time::Duration::from_secs(1));
+                    }
+                }
             }
+            info!("V4L2 direct capture thread exited");
         });
 
         Ok(rx)
@@ -413,6 +423,26 @@ fn run_direct_capture(
     loop {
         if stop_flag.load(Ordering::SeqCst) {
             break;
+        }
+
+        // Ждём кадр с таймаутом (2 с). UVC-камера после грязного обрыва
+        // предыдущего клиента может молча не отдавать кадры — без poll это
+        // вечно блокирует DQBUF (диагностика gdb, 2026-09-01).
+        let mut pfd = libc::pollfd {
+            fd,
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        let pret = unsafe { libc::poll(&mut pfd, 1, 2000) };
+        if pret == 0 {
+            warn!("V4L2 direct: нет кадров 2 с — реинициализация устройства");
+            return Err(VideoCaptureError::Capture("frame timeout".into()));
+        } else if pret < 0 {
+            let err = std::io::Error::last_os_error();
+            if err.kind() == std::io::ErrorKind::Interrupted {
+                continue;
+            }
+            return Err(VideoCaptureError::Capture(format!("poll: {err}")));
         }
 
         // Dequeue (VIDIOC_DQBUF) — hot path, raw buffer.
