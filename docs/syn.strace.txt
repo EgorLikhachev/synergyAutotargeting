@@ -1,0 +1,65 @@
+5668  ioctl(4, VIDIOC_S_FMT, {type=V4L2_BUF_TYPE_VIDEO_CAPTURE, fmt.pix={width=640, height=480, pixelformat=v4l2_fourcc('M', 'J', 'P', 'G') /* V4L2_PIX_FMT_MJPEG */, field=V4L2_FIELD_ANY, bytesperline=0, sizeimage=0, colorspace=V4L2_COLORSPACE_DEFAULT} <unfinished ...>
+5667  ioctl(5, DRM_IOCTL_VERSION, 0xffff84000d20) = 0
+5667  ioctl(5, DRM_IOCTL_VERSION, 0xffff84000d20) = 0
+5667  ioctl(5, DRM_IOCTL_VERSION, 0xffff84000e70) = 0
+5667  ioctl(5, DRM_IOCTL_VERSION, 0xffff84000e70) = 0
+5667  ioctl(5, DRM_IOCTL_VERSION, 0xffff84000f60) = 0
+5667  ioctl(5, DRM_IOCTL_VERSION, 0xffff84000f60) = 0
+5667  ioctl(5, DRM_IOCTL_GET_UNIQUE, 0xffff89a7c830) = 0
+5667  ioctl(5, DRM_IOCTL_GET_UNIQUE, 0xffff89a7c830) = 0
+5667  ioctl(5, DRM_IOCTL_QXL_ALLOC, 0xffff89a7cb60) = 0
+5667  ioctl(5, DRM_IOCTL_QXL_ALLOC, 0xffff89a7cb60) = 0
+5667  ioctl(5, DRM_IOCTL_QXL_ALLOC, 0xffff89a7ca00) = -1 EINVAL (Invalid argument)
+5667  ioctl(5, DRM_IOCTL_QXL_ALLOC, 0xffff89a7ca10) = 0
+5667  ioctl(5, DRM_IOCTL_QXL_ALLOC, 0xffff89a7c5f0) = 0
+5668  <... ioctl resumed>} => {fmt.pix={width=640, height=480, pixelformat=v4l2_fourcc('M', 'J', 'P', 'G') /* V4L2_PIX_FMT_MJPEG */, field=V4L2_FIELD_NONE, bytesperline=0, sizeimage=614989, colorspace=V4L2_COLORSPACE_SRGB}}) = 0
+5667  ioctl(5, DRM_IOCTL_QXL_ALLOC, 0xffff89a7b6f0) = 0
+5667  ioctl(5, _IOC(_IOC_READ|_IOC_WRITE, 0x64, 0x42, 0x30) <unfinished ...>
+5668  ioctl(4, VIDIOC_S_PARM, {type=V4L2_BUF_TYPE_VIDEO_CAPTURE, parm.capture={capability=0, capturemode=0, timeperframe=1/30, extendedmode=0, readbuffers=0} <unfinished ...>
+5667  <... ioctl resumed>, 0xffff89a79780) = 0
+5667  ioctl(5, DRM_IOCTL_GEM_FLINK, 0xffff89a7aa70) = -1 EACCES (Permission denied)
+5667  ioctl(5, DRM_IOCTL_PRIME_HANDLE_TO_FD, 0xffff89a7b0b0) = 0
+5667  ioctl(5, DRM_IOCTL_ETNAVIV_GEM_INFO or DRM_IOCTL_OMAP_GEM_NEW or DRM_IOCTL_PANFROST_MMAP_BO or DRM_IOCTL_V3D_MMAP_BO or DRM_IOCTL_VC4_CREATE_BO or DRM_IOCTL_VIRTGPU_GETPARAM, 0xffff89a7b3d0) = 0
+5667  ioctl(5, _IOC(_IOC_READ|_IOC_WRITE, 0x64, 0x45, 0x20), 0xffff89a79360) = 0
+5667  ioctl(5, DRM_IOCTL_QXL_ALLOC, 0xffff89a7b6f0) = 0
+5667  ioctl(5, _IOC(_IOC_READ|_IOC_WRITE, 0x64, 0x42, 0x30), 0xffff89a79780) = 0
+5667  ioctl(5, DRM_IOCTL_GEM_FLINK, 0xffff89a7aa70) = -1 EACCES (Permission denied)
+5667  ioctl(5, DRM_IOCTL_PRIME_HANDLE_TO_FD, 0xffff89a7b0b0) = 0
+5667  ioctl(5, DRM_IOCTL_ETNAVIV_GEM_INFO or DRM_IOCTL_OMAP_GEM_NEW or DRM_IOCTL_PANFROST_MMAP_BO or DRM_IOCTL_V3D_MMAP_BO or DRM_IOCTL_VC4_CREATE_BO or DRM_IOCTL_VIRTGPU_GETPARAM, 0xffff89a7b3d0) = 0
+5667  ioctl(5, _IOC(_IOC_READ|_IOC_WRITE, 0x64, 0x45, 0x20), 0xffff89a79360) = 0
+5667  ioctl(5, DRM_IOCTL_QXL_ALLOC, 0xffff89a7b770) = 0
+5667  ioctl(5, _IOC(_IOC_READ|_IOC_WRITE, 0x64, 0x42, 0x30), 0xffff89a79800) = 0
+5667  ioctl(5, DRM_IOCTL_GEM_FLINK, 0xffff89a7aaf0) = -1 EACCES (Permission denied)
+5667  ioctl(5, DRM_IOCTL_PRIME_HANDLE_TO_FD, 0xffff89a7b130) = 0
+5667  ioctl(5, DRM_IOCTL_ETNAVIV_GEM_INFO or DRM_IOCTL_OMAP_GEM_NEW or DRM_IOCTL_PANFROST_MMAP_BO or DRM_IOCTL_V3D_MMAP_BO or DRM_IOCTL_VC4_CREATE_BO or DRM_IOCTL_VIRTGPU_GETPARAM, 0xffff89a7b450) = 0
+5667  ioctl(5, _IOC(_IOC_READ|_IOC_WRITE, 0x64, 0x45, 0x20), 0xffff89a793e0) = 0
+5667  ioctl(5, _IOC(_IOC_READ|_IOC_WRITE, 0x64, 0x45, 0x20), 0xffff89a7bb10) = 0
+5667  ioctl(5, _IOC(_IOC_READ|_IOC_WRITE, 0x64, 0x45, 0x20), 0xffff89a7bb10) = 0
+5667  ioctl(5, DRM_IOCTL_QXL_ALLOC, 0xffff89a7c170) = 0
+5667  ioctl(5, DRM_IOCTL_QXL_ALLOC, 0xffff89a7c170) = 0
+5667  ioctl(5, _IOC(_IOC_READ|_IOC_WRITE, 0x64, 0x45, 0x20), 0xffff89a7c2f0) = 0
+5667  ioctl(5, _IOC(_IOC_READ|_IOC_WRITE, 0x64, 0x45, 0x20), 0xffff89a7c2f0) = 0
+5667  ioctl(5, DRM_IOCTL_QXL_ALLOC, 0xffff89a7c1d0) = 0
+5667  ioctl(5, _IOC(_IOC_READ|_IOC_WRITE, 0x64, 0x42, 0x30) <unfinished ...>
+5668  <... ioctl resumed>} => {parm.capture={capability=V4L2_CAP_TIMEPERFRAME, capturemode=0, timeperframe=1/30, extendedmode=0, readbuffers=0}}) = 0
+5668  ioctl(4, VIDIOC_REQBUFS, {type=V4L2_BUF_TYPE_VIDEO_CAPTURE, memory=V4L2_MEMORY_MMAP, count=4 => 4}) = 0
+5668  ioctl(4, VIDIOC_QUERYBUF, {type=V4L2_BUF_TYPE_VIDEO_CAPTURE, index=0, memory=V4L2_MEMORY_MMAP, m.offset=0, length=614989, bytesused=0, flags=V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC|V4L2_BUF_FLAG_TSTAMP_SRC_SOE, ...}) = 0
+5668  ioctl(4, VIDIOC_QBUF, {type=V4L2_BUF_TYPE_VIDEO_CAPTURE, index=0, memory=V4L2_MEMORY_MMAP, m.offset=0, length=614989, bytesused=0, flags=V4L2_BUF_FLAG_MAPPED|V4L2_BUF_FLAG_QUEUED|V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC|V4L2_BUF_FLAG_TSTAMP_SRC_SOE, ...}) = 0
+5668  ioctl(4, VIDIOC_QUERYBUF, {type=V4L2_BUF_TYPE_VIDEO_CAPTURE, index=1, memory=V4L2_MEMORY_MMAP, m.offset=0x97000, length=614989, bytesused=0, flags=V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC|V4L2_BUF_FLAG_TSTAMP_SRC_SOE, ...}) = 0
+5668  ioctl(4, VIDIOC_QBUF, {type=V4L2_BUF_TYPE_VIDEO_CAPTURE, index=1, memory=V4L2_MEMORY_MMAP, m.offset=0x97000, length=614989, bytesused=0, flags=V4L2_BUF_FLAG_MAPPED|V4L2_BUF_FLAG_QUEUED|V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC|V4L2_BUF_FLAG_TSTAMP_SRC_SOE, ...}) = 0
+5668  ioctl(4, VIDIOC_QUERYBUF, {type=V4L2_BUF_TYPE_VIDEO_CAPTURE, index=2, memory=V4L2_MEMORY_MMAP, m.offset=0x12e000, length=614989, bytesused=0, flags=V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC|V4L2_BUF_FLAG_TSTAMP_SRC_SOE, ...}) = 0
+5668  ioctl(4, VIDIOC_QBUF, {type=V4L2_BUF_TYPE_VIDEO_CAPTURE, index=2, memory=V4L2_MEMORY_MMAP, m.offset=0x12e000, length=614989, bytesused=0, flags=V4L2_BUF_FLAG_MAPPED|V4L2_BUF_FLAG_QUEUED|V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC|V4L2_BUF_FLAG_TSTAMP_SRC_SOE, ...}) = 0
+5668  ioctl(4, VIDIOC_QUERYBUF, {type=V4L2_BUF_TYPE_VIDEO_CAPTURE, index=3, memory=V4L2_MEMORY_MMAP, m.offset=0x1c5000, length=614989, bytesused=0, flags=V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC|V4L2_BUF_FLAG_TSTAMP_SRC_SOE, ...}) = 0
+5668  ioctl(4, VIDIOC_QBUF, {type=V4L2_BUF_TYPE_VIDEO_CAPTURE, index=3, memory=V4L2_MEMORY_MMAP, m.offset=0x1c5000, length=614989, bytesused=0, flags=V4L2_BUF_FLAG_MAPPED|V4L2_BUF_FLAG_QUEUED|V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC|V4L2_BUF_FLAG_TSTAMP_SRC_SOE, ...}) = 0
+5668  ioctl(4, VIDIOC_STREAMON, [V4L2_BUF_TYPE_VIDEO_CAPTURE] <unfinished ...>
+5667  <... ioctl resumed>, 0xffff89a7a260) = 0
+5667  ioctl(5, DRM_IOCTL_GEM_FLINK, 0xffff89a7b550) = -1 EACCES (Permission denied)
+5667  ioctl(5, DRM_IOCTL_PRIME_HANDLE_TO_FD, 0xffff89a7bb90) = 0
+5667  ioctl(5, DRM_IOCTL_ETNAVIV_GEM_INFO or DRM_IOCTL_OMAP_GEM_NEW or DRM_IOCTL_PANFROST_MMAP_BO or DRM_IOCTL_V3D_MMAP_BO or DRM_IOCTL_VC4_CREATE_BO or DRM_IOCTL_VIRTGPU_GETPARAM, 0xffff89a7beb0) = 0
+5667  ioctl(5, _IOC(_IOC_READ|_IOC_WRITE, 0x64, 0x45, 0x20), 0xffff89a79e40) = 0
+5667  --- SIGSEGV {si_signo=SIGSEGV, si_code=SEGV_MAPERR, si_addr=0x84001590} ---
+5667  --- SIGSEGV {si_signo=SIGSEGV, si_code=SEGV_MAPERR, si_addr=0x84001590} ---
+5668  <... ioctl resumed>)              = ?
+5667  +++ killed by SIGSEGV +++
+5668  +++ killed by SIGSEGV +++
+5666  +++ killed by SIGSEGV +++

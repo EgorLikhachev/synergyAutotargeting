@@ -93,6 +93,64 @@ pub struct rknn_tensor_mem {
     pub priv_data: *mut c_void,
 }
 
+/// rknn_input (для rknn_inputs_set — copy-режим).
+#[repr(C)]
+#[derive(Debug, Clone)]
+pub struct rknn_input {
+    pub index: u32,
+    _pad0: u32,
+    pub buf: *mut c_void,
+    pub size: u32,
+    pub pass_through: u8,
+    _pad1: [u8; 3],
+    pub type_: u32,
+    pub fmt: u32,
+}
+
+impl rknn_input {
+    pub fn new(index: u32, buf: *mut c_void, size: u32, type_: u32, fmt: u32) -> Self {
+        Self {
+            index,
+            _pad0: 0,
+            buf,
+            size,
+            pass_through: 0,
+            _pad1: [0; 3],
+            type_,
+            fmt,
+        }
+    }
+}
+
+/// rknn_output (для rknn_outputs_get — copy-режим).
+#[repr(C)]
+#[derive(Debug, Clone)]
+pub struct rknn_output {
+    pub want_float: u8,
+    pub is_prealloc: u8,
+    _pad0: [u8; 2],
+    pub index: u32,
+    _pad1: u32,
+    pub buf: *mut c_void,
+    pub size: u32,
+    _pad2: u32,
+}
+
+impl rknn_output {
+    pub fn want_float(index: u32) -> Self {
+        Self {
+            want_float: 1,
+            is_prealloc: 0,
+            _pad0: [0; 2],
+            index,
+            _pad1: 0,
+            buf: std::ptr::null_mut(),
+            size: 0,
+            _pad2: 0,
+        }
+    }
+}
+
 extern "C" {
     pub fn rknn_init(
         context: *mut rknn_context,
@@ -117,6 +175,22 @@ extern "C" {
         attr: *mut rknn_tensor_attr,
     ) -> i32;
     pub fn rknn_run(ctx: rknn_context, extend: *mut c_void) -> i32;
+    pub fn rknn_inputs_set(
+        ctx: rknn_context,
+        n_inputs: u32,
+        inputs: *mut rknn_input,
+    ) -> i32;
+    pub fn rknn_outputs_get(
+        ctx: rknn_context,
+        n_outputs: u32,
+        outputs: *mut rknn_output,
+        extend: *mut c_void,
+    ) -> i32;
+    pub fn rknn_outputs_release(
+        ctx: rknn_context,
+        n_outputs: u32,
+        outputs: *mut rknn_output,
+    ) -> i32;
     pub fn rknn_set_input_shapes(
         ctx: rknn_context,
         n_inputs: u32,

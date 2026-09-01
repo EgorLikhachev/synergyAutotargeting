@@ -1,5 +1,6 @@
-//! Безопасная обёртка над RKNN C API с zero-copy IO.
-//! Rust-порт RknnBackend из rknn-bridge (Autotargeting), см. ADR-002.
+//! Безопасная обёртка над RKNN C API. Copy-режим (rknn_inputs_set /
+//! rknn_outputs_get) — см. ADR-006: zero-copy rknn_create_mem на этой
+//! сборке librknnrt 2.3.0 (apt, Radxa) уходит в DRM/GBM и падает SIGSEGV.
 
 use std::ffi::c_void;
 use std::fs;
@@ -19,49 +20,40 @@ pub enum RknnError {
     Query { what: &'static str, code: i32 },
     #[error("rknn_set_core_mask failed: {0}")]
     CoreMask(i32),
-    #[error("rknn_create_mem failed ({what})")]
-    CreateMem { what: &'static str },
-    #[error("rknn_set_io_mem failed ({what}): {0}")]
-    SetIoMem { what: &'static str, code: i32 },
+    #[error("rknn_set_input_shapes failed: {0}")]
+    SetInputShapes(i32),
+    #[error("rknn_inputs_set failed: {0}")]
+    InputsSet(i32),
     #[error("rknn_run failed: {0}")]
     Run(i32),
+    #[error("rknn_outputs_get failed: {0}")]
+    OutputsGet(i32),
     #[error("кадр меньше тензора: {frame} байт < {need}")]
     FrameTooSmall { frame: usize, need: usize },
     #[error("модель не загружена")]
     NotLoaded,
-    #[error("rknn_set_input_shapes failed: {0}")]
-    SetInputShapes(i32),
 }
 
 pub type RknnResult<T> = std::result::Result<T, RknnError>;
 
-/// Загруженная RKNN-модель с выделенным zero-copy буферами.
+/// Загруженная RKNN-модель (copy-режим IO).
 ///
-/// НЕ потокобезопасна: создавайте по одному экземпляру на поток
-/// (детектор-воркер владеет ею единолично).
+/// НЕ потокобезопасна: один экземпляр — один поток (детектор-воркер).
 pub struct RknnModel {
     ctx: rknn_context,
-    input_attr: rknn_tensor_attr,
-    output_attrs: Vec<rknn_tensor_attr>,
-    input_mem: *mut rknn_tensor_mem,
-    output_mems: Vec<*mut rknn_tensor_mem>,
-    /// (w, h) входного тензора в текущем виде.
+    /// Вход (w, h) тензора — для letterbox у вызывающего.
     pub input_w: u32,
     pub input_h: u32,
-    /// Число выходов модели.
     pub n_output: usize,
-    // Число классов не храним — его выводит декодер по форме выходов.
+    output_attrs: Vec<rknn_tensor_attr>,
 }
-
-// Внутри сырые указатели на память, выделенную рантаймом; владение
-// эксклюзивное (кстати, поэтому автоматический Send/Sync здесь и не нужен).
 
 impl RknnModel {
     /// Загрузить модель из файла.
     ///
-    /// `shape`: желаемая (w, h) входа. Для динамических моделей применяется
-    /// через rknn_set_input_shapes; для статических должна совпадать с
-    /// встроенной (иначе ошибка рантайма при первом run).
+    /// `shape`: желаемый вход (w, h) для динамических моделей
+    /// (rknn_set_input_shapes). Для статических моделей применяется
+    /// безусловно и должен совпадать со встроенным.
     pub fn load(path: &str, shape: Option<(u32, u32)>) -> RknnResult<Self> {
         let data = fs::read(path)
             .map_err(|e| RknnError::ModelFile(format!("{path}: {e}")))?;
@@ -80,10 +72,11 @@ impl RknnModel {
             return Err(RknnError::Init(ret));
         }
 
-        // Привязка к ядру NPU 0 — см. комментарий в шапке крейта (segfault на 2.3.0).
+        // Ядро NPU 0 — на драйвере 2.3.0 AUTO-планировка наблюдалась
+        // segfault-ами (перенос из rknn-bridge Autotargeting).
         let ret = unsafe { rknn_set_core_mask(ctx, RKNN_NPU_CORE_0) };
         if ret < 0 {
-            tracing::warn!(code = ret, "rknn_set_core_mask failed, продолжаем на AUTO");
+            tracing::warn!(code = ret, "rknn_set_core_mask failed, продолжаем");
         }
 
         let mut io = rknn_input_output_num::default();
@@ -96,35 +89,24 @@ impl RknnModel {
 
         let mut model = Self {
             ctx,
-            input_attr: Default::default(),
-            output_attrs: Vec::new(),
-            input_mem: null_mut(),
-            output_mems: Vec::new(),
             input_w: 0,
             input_h: 0,
             n_output: io.n_output as usize,
+            output_attrs: Vec::new(),
         };
 
-        // Динамическая форма: применяем желаемую до выделения памяти.
         if let Some((w, h)) = shape {
             model.apply_input_shape(w, h)?;
         }
-
-        model.setup_io()?;
+        model.query_io()?;
         Ok(model)
     }
 
-    /// Попытаться задать входную форму (только для динамических моделей).
-    /// Статическим моделям не вредит: rknn_set_input_shapes вернёт ошибку,
-    /// которую мы логируем и игнорируем, если форма уже такая.
+    /// Установить входную форму (динамические модели).
     fn apply_input_shape(&mut self, w: u32, h: u32) -> RknnResult<()> {
         let mut attr = rknn_tensor_attr::default();
         attr.index = 0;
-        let ret =
-            unsafe { rknn_query(self.ctx, RKNN_QUERY_INPUT_ATTR, &mut attr as *mut _ as *mut c_void, std::mem::size_of::<rknn_tensor_attr>() as u32) };
-        if ret < 0 {
-            return Err(RknnError::Query { what: "INPUT_ATTR", code: ret });
-        }
+        query(self.ctx, RKNN_QUERY_INPUT_ATTR, &mut attr, "INPUT_ATTR")?;
         tracing::info!(
             n_dims = attr.n_dims,
             dims = ?attr.dims.iter().take(attr.n_dims as usize).collect::<Vec<_>>(),
@@ -142,114 +124,84 @@ impl RknnModel {
         Ok(())
     }
 
-    /// Форсировать типы IO и выделить zero-copy буферы (один раз при загрузке).
-    fn setup_io(&mut self) -> RknnResult<()> {
-        // === ВХОД: UINT8 / NHWC ===
+    /// Запросить формы входа/выходов (для letterbox и декодера).
+    fn query_io(&mut self) -> RknnResult<()> {
         let mut attr = rknn_tensor_attr::default();
         attr.index = 0;
         query(self.ctx, RKNN_QUERY_INPUT_ATTR, &mut attr, "INPUT_ATTR")?;
-        attr.type_ = RKNN_TENSOR_UINT8;
-        attr.fmt = RKNN_TENSOR_NHWC;
-        attr.h_stride = 0;
-        self.input_attr = attr;
         self.input_w = tensor_width(&attr);
         self.input_h = tensor_height(&attr);
-        tracing::info!(
-            w = self.input_w,
-            h = self.input_h,
-            size_with_stride = self.input_attr.size_with_stride,
-            "входной тензор (UINT8/NHWC)"
-        );
+        tracing::info!(w = self.input_w, h = self.input_h, "входной тензор");
 
-        // === ВЫХОДЫ: FLOAT32 ===
         for i in 0..self.n_output as u32 {
             let mut oa = rknn_tensor_attr::default();
             oa.index = i;
             query(self.ctx, RKNN_QUERY_OUTPUT_ATTR, &mut oa, "OUTPUT_ATTR")?;
-            oa.type_ = RKNN_TENSOR_FLOAT32;
+            tracing::debug!(
+                index = i,
+                dims = ?oa.dims.iter().take(oa.n_dims as usize).collect::<Vec<_>>(),
+                n_elems = oa.n_elems,
+                "выход модели"
+            );
             self.output_attrs.push(oa);
-        }
-
-        // === Выделение памяти ===
-        let in_sz = self.input_attr.size_with_stride.max(self.input_attr.size);
-        let mem = unsafe { rknn_create_mem(self.ctx, in_sz) };
-        if mem.is_null() {
-            return Err(RknnError::CreateMem { what: "input" });
-        }
-        let mut input_attr = self.input_attr;
-        let ret = unsafe { rknn_set_io_mem(self.ctx, mem, &mut input_attr) };
-        if ret < 0 {
-            return Err(RknnError::SetIoMem { what: "input", code: ret });
-        }
-        self.input_attr = input_attr;
-        self.input_mem = mem;
-
-        for i in 0..self.output_attrs.len() {
-            let sz = self.output_attrs[i]
-                .size_with_stride
-                .max(self.output_attrs[i].n_elems.saturating_mul(4));
-            let mem = unsafe { rknn_create_mem(self.ctx, sz) };
-            if mem.is_null() {
-                return Err(RknnError::CreateMem { what: "output" });
-            }
-            let ret = unsafe {
-                rknn_set_io_mem(self.ctx, mem, &mut self.output_attrs[i])
-            };
-            if ret < 0 {
-                return Err(RknnError::SetIoMem { what: "output", code: ret });
-            }
-            self.output_mems.push(mem);
         }
         Ok(())
     }
 
-    /// Прогнать инференс на RGB24-кадре (w*h*3 байт, уже letterboxed до
-    /// размеров входного тензора). Возвращает по Vec<f32> на каждый выход.
+    /// Инференс на RGB24-кадре (letterboxed до input_w × input_h, NHWC).
+    /// Возвращает Vec<f32> на каждый выход (copy-режим, want_float=1).
     pub fn infer(&mut self, rgb: &[u8]) -> RknnResult<Vec<Vec<f32>>> {
-        if self.input_mem.is_null() {
-            return Err(RknnError::NotLoaded);
-        }
         let tw = self.input_w as usize;
         let th = self.input_h as usize;
-        let row_bytes = tw * 3;
-        let w_stride = if self.input_attr.w_stride > 0 {
-            self.input_attr.w_stride as usize
-        } else {
-            row_bytes
-        };
-        let needed = row_bytes * th;
+        let needed = tw * th * 3;
         if rgb.len() < needed {
             return Err(RknnError::FrameTooSmall { frame: rgb.len(), need: needed });
         }
-        unsafe {
-            let dst = (*self.input_mem).virt_addr as *mut u8;
-            if w_stride == row_bytes {
-                std::ptr::copy_nonoverlapping(rgb.as_ptr(), dst, needed);
-            } else {
-                for y in 0..th {
-                    std::ptr::copy_nonoverlapping(
-                        rgb.as_ptr().add(y * row_bytes),
-                        dst.add(y * w_stride),
-                        row_bytes,
-                    );
-                }
-            }
-            let ret = rknn_run(self.ctx, null_mut());
-            if ret < 0 {
-                return Err(RknnError::Run(ret));
-            }
-            let mut outs = Vec::with_capacity(self.output_mems.len());
-            for (mem, attr) in self.output_mems.iter().zip(self.output_attrs.iter()) {
-                let src = (**mem).virt_addr as *const f32;
-                let n = attr.n_elems as usize;
-                let slice = std::slice::from_raw_parts(src, n);
-                outs.push(slice.to_vec());
-            }
-            Ok(outs)
+
+        // 1) inputs_set: UINT8 / NHWC, runtime сам нормализует и квантует.
+        let mut input = rknn_input::new(
+            0,
+            rgb.as_ptr() as *mut c_void,
+            needed as u32,
+            RKNN_TENSOR_UINT8,
+            RKNN_TENSOR_NHWC,
+        );
+        let ret = unsafe { rknn_inputs_set(self.ctx, 1, &mut input) };
+        if ret < 0 {
+            return Err(RknnError::InputsSet(ret));
         }
+
+        // 2) run.
+        let ret = unsafe { rknn_run(self.ctx, null_mut()) };
+        if ret < 0 {
+            return Err(RknnError::Run(ret));
+        }
+
+        // 3) outputs_get: просим float32 (runtime конвертирует fp16/int8).
+        let n = self.n_output as u32;
+        let mut outputs: Vec<rknn_output> = (0..n).map(rknn_output::want_float).collect();
+        let ret = unsafe { rknn_outputs_get(self.ctx, n, outputs.as_mut_ptr(), null_mut()) };
+        if ret < 0 {
+            return Err(RknnError::OutputsGet(ret));
+        }
+
+        let mut result = Vec::with_capacity(outputs.len());
+        for out in &outputs {
+            let n_floats = out.size as usize / 4;
+            let slice = if out.buf.is_null() || n_floats == 0 {
+                &[][..]
+            } else {
+                unsafe { std::slice::from_raw_parts(out.buf as *const f32, n_floats) }
+            };
+            result.push(slice.to_vec());
+        }
+
+        // 4) release (освобождает буферы, выделенные рантаймом).
+        unsafe { rknn_outputs_release(self.ctx, n, outputs.as_mut_ptr()) };
+        Ok(result)
     }
 
-    /// Формы выходов (dims каждого выхода, как их отдаёт рантайм).
+    /// Формы выходов (dims каждого выхода).
     pub fn output_dims(&self) -> Vec<Vec<u32>> {
         self.output_attrs
             .iter()
@@ -260,14 +212,7 @@ impl RknnModel {
 
 impl Drop for RknnModel {
     fn drop(&mut self) {
-        // Порядок критичен: память освобождается при живом контексте.
         unsafe {
-            for mem in self.output_mems.drain(..) {
-                rknn_destroy_mem(self.ctx, mem);
-            }
-            if !self.input_mem.is_null() {
-                rknn_destroy_mem(self.ctx, self.input_mem);
-            }
             if self.ctx >= 0 {
                 rknn_destroy(self.ctx);
             }
@@ -291,7 +236,7 @@ fn query<T>(ctx: rknn_context, cmd: i32, out: &mut T, what: &'static str) -> Rkn
     }
 }
 
-/// Ширина входного тензора по dims: NHWC → dims[2], NCHW → dims[3].
+/// Ширина входного тензора: NHWC → dims[2], NCHW → dims[3].
 fn tensor_width(attr: &rknn_tensor_attr) -> u32 {
     let d: Vec<u32> = attr.dims.iter().take(attr.n_dims as usize).copied().collect();
     if d.len() == 4 {
@@ -305,7 +250,7 @@ fn tensor_width(attr: &rknn_tensor_attr) -> u32 {
     }
 }
 
-/// Высота входного тензора по dims: NHWC → dims[1], NCHW → dims[2].
+/// Высота входного тензора: NHWC → dims[1], NCHW → dims[2].
 fn tensor_height(attr: &rknn_tensor_attr) -> u32 {
     let d: Vec<u32> = attr.dims.iter().take(attr.n_dims as usize).copied().collect();
     if d.len() == 4 {
