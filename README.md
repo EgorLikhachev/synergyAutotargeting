@@ -12,7 +12,11 @@
 | SDD-описательные файлы | **Autotargeting** | формат docs/SDD-SPEC + sdd/decisions + progress.json |
 | V4L2 direct capture | **Autotargeting** | `v4l2_direct.rs` (32→100 FPS против v4l-crate, ADR D-011) |
 | Калман-фильтр | **Autotargeting** | `kalman.rs` (константная скорость, сглаживание между детекциями) |
-| NPU zero-copy приёмы | **Autotargeting** | UINT8/NHWC вход + FLOAT32 выход через `rknn_set_io_mem`, NPU_CORE_0 (ADR D-007/D-010) |
+| NPU-приёмы | **Autotargeting** | UINT8/NHWC вход + FLOAT32 выход, NPU_CORE_0 (ADR D-007/D-010); in-process вместо сокета (ADR-002) |
+
+**Итог ночного прогона на железе (2026-09-01):** 28.3 FPS пайплайна,
+трекинг 30.3 мс/кадр, NPU-инференс 640×640 — 35.7 мс, 100% кадров в
+TRACKING. Полный отчёт — [docs/HARDWARE_TEST_RESULTS.md](docs/HARDWARE_TEST_RESULTS.md).
 
 ## Архитектура (Rust-first)
 
@@ -22,8 +26,9 @@
                                    └─ раз в N ──→ letterbox → YOLOv8 (NPU) ──┘
 ```
 
-- `crates/rknn-sys` — FFI к librknnrt.so: in-process zero-copy инференс
-  (замена base64-сокет-моста из Autotargeting, ADR-002).
+- `crates/rknn-sys` — FFI к librknnrt.so: in-process инференс copy-mode
+  (замена base64-сокет-моста из Autotargeting; zero-copy на этом рантайме
+  падает — ADR-002/006).
 - `crates/detector` — YOLOv8-декодер: автоопределение layout (6 выходов bkb с DFL
   или 1 выход Autotargeting с sigmoid), NMS.
 - `crates/nano-track` — порт OpenCV TrackerNano на tract + стабилизатор bkb + Калман.
@@ -46,7 +51,10 @@ Radxa ROCK 5A v1.2 (RK3588S, 16 ГБ) + USB-камера Arducam. Radxa Debian 1
 # На борту (aarch64 Linux):
 cargo build --release --features npu
 cp config.example.toml config.toml   # поправьте /dev/videoX
-./target/release/synergy --duration 60
+./target/release/synergy --duration 60          # реальная NPU-детекция
+
+# Цель в кадре отсутствует, но трекер нужно погонять на живом видео:
+./target/release/synergy --duration 60 --demo-detect   # цель-фантом в центре
 
 # Локально без железа (синтетический источник, трекер на tract):
 cargo run --release -- --synthetic --duration 10

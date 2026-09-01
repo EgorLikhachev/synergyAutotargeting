@@ -216,7 +216,11 @@ impl Runner {
                 stats.detect_us_total as f32 / stats.detections_run as f32 / 1000.0
             );
         }
-        let _ = det_req_tx; // закрыть канал — воркер завершится
+        // `let _ = det_req_tx;` здесь НЕ роняет канал: паттерн `_` не двигает
+        // place-expression (проверено на борту, gdb: воркер в recv(), main в
+        // join()). Явные drop обоих концов размыкают цикл воркера.
+        drop(det_req_tx);
+        drop(det_resp_rx);
         if let Some(h) = det_handle {
             let _ = h.join();
         }
