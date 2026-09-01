@@ -266,12 +266,15 @@ impl Runner {
                         "декодер YOLOv8 готов"
                     );
                     while let Ok((rgb, w, h, seq)) = req_rx.recv() {
+                        eprintln!("[DET] got request seq={seq} len={}", rgb.len());
                         let t0 = Instant::now();
                         let (letterboxed, lb) =
                             detector::letterbox_rgb24(&rgb, w, h, model.input_w.max(1));
+                        eprintln!("[DET] letterbox done, tensor {}x{}", model.input_w, model.input_h);
                         match model.infer(&letterboxed) {
                             Ok(outputs) => {
                                 let infer_us = t0.elapsed().as_micros();
+                                eprintln!("[DET] infer OK за {} mks, выходов={}", infer_us, outputs.len());
                                 let dets = decoder.decode(
                                     &outputs,
                                     &dims,
@@ -287,6 +290,7 @@ impl Runner {
                                 }));
                             }
                             Err(e) => {
+                                eprintln!("[DET] infer ERR: {e}");
                                 let _ = resp_tx.send(Err(format!("infer: {e}")));
                             }
                         }
