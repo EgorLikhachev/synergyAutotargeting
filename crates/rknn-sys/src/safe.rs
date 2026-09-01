@@ -176,19 +176,25 @@ impl RknnModel {
         if mem.is_null() {
             return Err(RknnError::CreateMem { what: "input" });
         }
-        let ret = unsafe { rknn_set_io_mem(self.ctx, mem, &self.input_attr) };
+        let mut input_attr = self.input_attr;
+        let ret = unsafe { rknn_set_io_mem(self.ctx, mem, &mut input_attr) };
         if ret < 0 {
             return Err(RknnError::SetIoMem { what: "input", code: ret });
         }
+        self.input_attr = input_attr;
         self.input_mem = mem;
 
-        for oa in &self.output_attrs {
-            let sz = oa.size_with_stride.max(oa.n_elems.saturating_mul(4));
+        for i in 0..self.output_attrs.len() {
+            let sz = self.output_attrs[i]
+                .size_with_stride
+                .max(self.output_attrs[i].n_elems.saturating_mul(4));
             let mem = unsafe { rknn_create_mem(self.ctx, sz) };
             if mem.is_null() {
                 return Err(RknnError::CreateMem { what: "output" });
             }
-            let ret = unsafe { rknn_set_io_mem(self.ctx, mem, oa as *const _ as *mut _) };
+            let ret = unsafe {
+                rknn_set_io_mem(self.ctx, mem, &mut self.output_attrs[i])
+            };
             if ret < 0 {
                 return Err(RknnError::SetIoMem { what: "output", code: ret });
             }
