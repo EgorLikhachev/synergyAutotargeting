@@ -1,0 +1,44 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/common",
+    "crates/capture",
+    "crates/rknn-sys",
+    "crates/detector",
+    "crates/nano-track",
+    "crates/pipeline",
+    "crates/app",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+license = "MIT"
+
+[workspace.dependencies]
+anyhow = "1"
+thiserror = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "signal"] }
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+chrono = { version = "0.4", features = ["serde"] }
+libc = "0.2"
+clap = { version = "4", features = ["derive"] }
+jpeg-decoder = "0.3"
+jpeg-encoder = "0.6"
+tract-onnx = "0.21"
+
+common = { path = "crates/common" }
+capture = { path = "crates/capture" }
+rknn-sys = { path = "crates/rknn-sys" }
+detector = { path = "crates/detector" }
+nano-track = { path = "crates/nano-track" }
+pipeline = { path = "crates/pipeline" }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+debug = true

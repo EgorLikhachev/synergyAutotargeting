@@ -1,0 +1,10 @@
+/target
+*.log
+data/
+data_local/
+snapshots/
+*.mp4
+*.mkv
+nohup.out
+.env
+config.toml

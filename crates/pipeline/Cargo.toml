@@ -1,0 +1,12 @@
+[package]
+name = "pipeline"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+common.workspace = true
+nano-track.workspace = true
+tracing.workspace = true
+serde.workspace = true

@@ -1,0 +1,39 @@
+# synergyAutotargeting — пример конфигурации
+# Копируйте в config.toml и правьте под своё железо.
+
+[camera]
+device = "/dev/video0"
+width = 640
+height = 480
+fps = 30
+format = "mjpeg"
+queue_depth = 4
+
+[detector]
+model_path = "models/model_5_dynamic_rk3588.rknn"
+input_size = 640
+conf_threshold = 0.45
+nms_threshold = 0.45
+# Имена классов заполняются после эмпирической проверки модели (см. docs/HARDWARE_TEST_RESULTS.md)
+class_names = []
+
+[tracker]
+backbone_path = "models/nanotrack_backbone_127.onnx"
+backbone_search_path = "models/nanotrack_backbone_sim.onnx"
+head_path = "models/nanotrack_head_sim.onnx"
+swap_rb = false
+min_track_score = 0.30
+
+[pipeline]
+detect_every_n = 10        # детекция раз в N кадров (10 => ~3 Гц при 30 FPS)
+iou_confirm = 0.30         # IoU детекции с треком для подтверждения цели
+lost_patience = 3          # кадров с низким score до форс-детекции
+min_detect_conf = 0.45
+priority_classes = []      # индексы приоритетных классов детектора
+use_stabilizer = true
+
+[output]
+dir = "data"
+snapshot_every = 30        # OSD-снапшот каждые N кадров
+telemetry = true
+duration_secs = 0          # 0 = до Ctrl+C

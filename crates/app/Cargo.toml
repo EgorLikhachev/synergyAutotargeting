@@ -1,0 +1,33 @@
+[package]
+name = "app"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "synergy"
+path = "src/main.rs"
+
+[dependencies]
+common.workspace = true
+capture.workspace = true
+detector.workspace = true
+nano-track.workspace = true
+pipeline.workspace = true
+rknn-sys.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+tokio.workspace = true
+serde.workspace = true
+toml.workspace = true
+chrono.workspace = true
+clap.workspace = true
+jpeg-decoder.workspace = true
+jpeg-encoder.workspace = true
+
+[features]
+default = []
+# Включает реальный NPU-путь (собирать на борту: cargo build --release --features npu)
+npu = ["rknn-sys/npu"]

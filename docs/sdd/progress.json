@@ -1,0 +1,30 @@
+{
+  "project": "synergyAutotargeting",
+  "variant": "C — трекинг каждый кадр + детекция раз в N кадров",
+  "updated": "2026-09-01",
+  "stack": {
+    "language": "rust",
+    "tracker": "NanoTrack (порт OpenCV TrackerNano) на tract",
+    "detector": "YOLOv8 RKNN на NPU через rknn-sys (FFI)",
+    "capture": "V4L2 direct ioctl"
+  },
+  "hardware": {
+    "board": "Radxa ROCK 5A v1.2 (RK3588S, 16GB)",
+    "os": "Radxa Debian 12, kernel 6.1.84-8-rk2410",
+    "camera": "Arducam USB (UVC, MJPG)",
+    "npu_runtime": "librknnrt.so 2.3.0 (apt rknpu2-rk3588)"
+  },
+  "milestones": [
+    { "id": "M0", "title": "плата готова", "status": "done",
+      "notes": "apt full-upgrade (395 пакетов), фикс dpkg-конфликта radxa-system-config-gdm3-disable-sleep, перезагрузка на 6.1.84, rustup, build-essential, v4l-utils" },
+    { "id": "M1", "title": "скелет workspace + SDD + push", "status": "done" },
+    { "id": "M1.5", "title": "локальная сборка/тесты Windows", "status": "done",
+      "notes": "37 юнит-тестов зелёные; synthetic-прогон: 175 кадров, 100% TRACKING, трекер в ~7px от истины, track ~20.7мс (x86)" },
+    { "id": "M2", "title": "capture на железе + FPS камеры", "status": "pending" },
+    { "id": "M3", "title": "rknn-sys инференс на NPU + классы модели", "status": "pending" },
+    { "id": "M4", "title": "nano-track на борту (замер мс)", "status": "pending" },
+    { "id": "M5", "title": "гибрид на камере + OSD", "status": "pending" },
+    { "id": "M6", "title": "soak-тест + HARDWARE_TEST_RESULTS", "status": "pending" },
+    { "id": "M7", "title": "стрим/коммандер-скаффолд", "status": "pending" }
+  ]
+}

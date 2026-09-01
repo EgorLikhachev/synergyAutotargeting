@@ -1,0 +1,16 @@
+[package]
+name = "rknn-sys"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "FFI-байндинги к librknnrt.so (Rockchip NPU) + безопасная обёртка с zero-copy IO"
+
+[dependencies]
+thiserror.workspace = true
+tracing.workspace = true
+
+[features]
+# Реальный NPU через librknnrt.so (только Linux/aarch64 на борту).
+# Без фичи — стаб, позволяющий собирать/тестировать остальной код на любой платформе.
+npu = []

@@ -1,0 +1,13 @@
+[package]
+name = "detector"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+common.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+approx = "0.5"
