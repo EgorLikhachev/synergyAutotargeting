@@ -213,7 +213,7 @@ impl RknnModel {
 impl Drop for RknnModel {
     fn drop(&mut self) {
         unsafe {
-            if self.ctx >= 0 {
+            if self.ctx != 0 {
                 rknn_destroy(self.ctx);
             }
         }

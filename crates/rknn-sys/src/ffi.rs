@@ -10,8 +10,12 @@ use std::ffi::c_void;
 pub const RKNN_MAX_DIMS: usize = 16;
 pub const RKNN_MAX_NAME_LEN: usize = 256;
 
-/// typedef int32_t rknn_context (в SDK — знаковый int; C++-код инициализировал -1).
-pub type rknn_context = i32;
+/// typedef rknn_context: на __arm__ (32-бит) — uint32_t, НА AARCH64 — uint64_t!
+/// (rknn_api.h, строки 124-130). Неверный размер = порча стека в rknn_init.
+#[cfg(target_arch = "arm")]
+pub type rknn_context = u32;
+#[cfg(not(target_arch = "arm"))]
+pub type rknn_context = u64;
 
 // === query commands ===
 pub const RKNN_QUERY_IN_OUT_NUM: i32 = 0;
