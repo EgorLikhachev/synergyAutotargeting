@@ -325,16 +325,26 @@ impl Runner {
         det_ms: &mut Option<f32>,
     ) -> Result<bool> {
         // 1) Отправить кадр на детекцию, если пора и детектор свободен.
+        if seq % 30 == 0 {
+            eprintln!(
+                "[MAIN] seq={seq} inflight={} wants={}",
+                hybrid.detect_inflight,
+                hybrid.wants_detection(seq)
+            );
+        }
         if hybrid.wants_detection(seq) && !hybrid.detect_inflight {
             if det_req_tx.try_send((rgb.clone(), w, h, seq)).is_ok() {
                 hybrid.detect_inflight = true;
                 stats.detections_run += 1;
+            } else {
+                eprintln!("[MAIN] try_send FAILED seq={seq}");
             }
         }
 
         // 2) Забрать результат детекции, если готов.
         if hybrid.detect_inflight {
             if let Ok(resp) = det_resp_rx.try_recv() {
+                eprintln!("[MAIN] got detection response at seq={seq}");
                 det_ms.take();
                 match resp {
                     Ok(r) => {
