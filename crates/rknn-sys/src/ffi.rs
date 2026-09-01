@@ -127,17 +127,16 @@ impl rknn_input {
 }
 
 /// rknn_output (для rknn_outputs_get — copy-режим).
+/// ВАЖНО: repr(C) сам вставляет выравнивание (index@4, buf@8, size@16, всего 24) —
+/// ручные паддинги между полями ставить НЕЛЬЗЯ (проверено горьким опытом).
 #[repr(C)]
 #[derive(Debug, Clone)]
 pub struct rknn_output {
     pub want_float: u8,
     pub is_prealloc: u8,
-    _pad0: [u8; 2],
     pub index: u32,
-    _pad1: u32,
     pub buf: *mut c_void,
     pub size: u32,
-    _pad2: u32,
 }
 
 impl rknn_output {
@@ -145,12 +144,9 @@ impl rknn_output {
         Self {
             want_float: 1,
             is_prealloc: 0,
-            _pad0: [0; 2],
             index,
-            _pad1: 0,
             buf: std::ptr::null_mut(),
             size: 0,
-            _pad2: 0,
         }
     }
 }
