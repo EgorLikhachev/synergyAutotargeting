@@ -3,7 +3,7 @@
 
 use std::ffi::c_void;
 use std::fs;
-use std::ptr::{null, null_mut};
+use std::ptr::null_mut;
 
 use thiserror::Error;
 
@@ -50,7 +50,7 @@ pub struct RknnModel {
     pub input_h: u32,
     /// Число выходов модели.
     pub n_output: usize,
-    /// Число классов не храним — его выводит декодер по форме выходов.
+    // Число классов не храним — его выводит декодер по форме выходов.
 }
 
 // Внутри сырые указатели на память, выделенную рантаймом; владение
@@ -134,7 +134,7 @@ impl RknnModel {
             // Предполагаем NCHW [N, C, H, W] — H и W последние.
             attr.dims[2] = h;
             attr.dims[3] = w;
-            let ret = unsafe { rknn_set_input_shapes(self.ctx, 1, &attr) };
+            let ret = unsafe { rknn_set_input_shapes(self.ctx, 1, &mut attr) };
             if ret < 0 {
                 return Err(RknnError::SetInputShapes(ret));
             }
@@ -228,7 +228,7 @@ impl RknnModel {
                     );
                 }
             }
-            let ret = rknn_run(self.ctx, null());
+            let ret = rknn_run(self.ctx, null_mut());
             if ret < 0 {
                 return Err(RknnError::Run(ret));
             }
