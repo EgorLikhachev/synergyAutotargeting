@@ -160,10 +160,30 @@ fn serve_client(mut stream: TcpStream, hub: Arc<Hub>) {
     let peer = stream.peer_addr().map(|a| a.to_string()).unwrap_or_default();
     let _ = stream.set_nodelay(true);
     let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
-    // Съесть HTTP-запрос (браузер шлёт GET; путь/заголовки не важны).
+    // Съесть HTTP-запрос; путь решает, что отдавать.
     let mut buf = [0u8; 2048];
     let n = stream.read(&mut buf).unwrap_or(0);
-    eprintln!("[MJPEG] {peer}: connect, запрос {n} байт");
+    let req = String::from_utf8_lossy(&buf[..n.min(buf.len())]).into_owned();
+    eprintln!("[MJPEG] {peer}: connect, {} байт: {}", req.lines().next().unwrap_or("").len(), req.lines().next().unwrap_or(""));
+
+    // Прямой multipart в адресной строке часть браузеров рендерит стопкой
+    // кадров («сетка»). Обёртка <img> заставляет заменять кадры по одному.
+    if !req.starts_with("GET /stream") {
+        const PAGE: &str = "<!DOCTYPE html><html><head><title>synergy OSD</title>\
+<style>html,body{margin:0;height:100%;background:#000;display:flex;\
+align-items:center;justify-content:center}img{max-width:100%;max-height:100%}\
+</style></head><body><img src=\"/stream\" alt=\"stream\"></body></html>";
+        let resp = format!(
+            "HTTP/1.0 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n\
+             Content-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n{}",
+            PAGE.len(),
+            PAGE
+        );
+        let _ = stream.write_all(resp.as_bytes());
+        let _ = stream.flush();
+        eprintln!("[MJPEG] {peer}: отдал HTML-обёртку");
+        return;
+    }
 
     let head = b"HTTP/1.0 200 OK\r\n\
                 Content-Type: multipart/x-mixed-replace; boundary=frame\r\n\
@@ -178,7 +198,7 @@ fn serve_client(mut stream: TcpStream, hub: Arc<Hub>) {
         let mut inner = hub.inner.lock().unwrap();
         inner.clients += 1;
     }
-    eprintln!("[MJPEG] {peer}: head записан, клиент зарегистрирован");
+    eprintln!("[MJPEG] {peer}: стрим запущен, клиент зарегистрирован");
 
     let mut seen: u64 = 0;
     loop {
@@ -250,10 +270,19 @@ mod tests {
             }
             std::thread::sleep(Duration::from_millis(200));
         });
+        // Как браузер: сначала страница-обёртка, потом <img> тянет /stream.
+        let mut page = TcpStream::connect(("127.0.0.1", port)).expect("connect");
+        page.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+        page.write_all(b"GET / HTTP/1.1\r\nHost: test\r\n\r\n").unwrap();
+        let mut page_buf = [0u8; 8192];
+        let pn = page.read(&mut page_buf).expect("html ответ");
+        let page_str = String::from_utf8_lossy(&page_buf[..pn]).into_owned();
+        assert!(page_str.starts_with("HTTP/1.0 200 OK"), "page={page_str}");
+        assert!(page_str.contains("<img src=\"/stream\""), "нет img-обёртки");
+
         let mut s = TcpStream::connect(("127.0.0.1", port)).expect("connect");
         s.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
-        // Как браузер: сначала GET, потом читаем поток.
-        s.write_all(b"GET / HTTP/1.1\r\nHost: test\r\n\r\n").unwrap();
+        s.write_all(b"GET /stream HTTP/1.1\r\nHost: test\r\n\r\n").unwrap();
         let mut all = Vec::new();
         let mut chunk = [0u8; 4096];
         loop {
