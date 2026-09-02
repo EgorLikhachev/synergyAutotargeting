@@ -147,7 +147,7 @@ impl HybridTracker {
         self.last_det_iou = current.map(|b| b.iou(&pick.bbox));
 
         let mut box_ = pick.bbox;
-        if let Some(cur) = current {
+        if let Some(_cur) = current {
             if self.last_det_iou.unwrap_or(0.0) >= self.config.iou_confirm
                 && self.tracker.is_initialized()
             {

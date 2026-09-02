@@ -10,6 +10,7 @@ pub enum Rgb {
     Cyan,
     Red,
     Yellow,
+    #[allow(dead_code)]
     White,
 }
 
@@ -70,7 +71,7 @@ pub fn draw_text(img: &mut [u8], w: u32, h: u32, text: &str, x: i32, y: i32, col
         if let Some(glyph) = glyph(ch) {
             draw_glyph(img, w, h, &glyph, cx, y, color, scale);
         }
-        cx += (3 * scale + scale); // 3 колонки + межбуквенный пробел
+        cx += 3 * scale + scale; // 3 колонки + межбуквенный пробел
     }
 }
 

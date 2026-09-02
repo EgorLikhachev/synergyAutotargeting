@@ -20,17 +20,16 @@ extern "C" fn on_signal(_sig: libc::c_int) {
 
 fn install_signal_handlers() {
     unsafe {
-        libc::signal(libc::SIGINT, on_signal as libc::sighandler_t);
-        libc::signal(libc::SIGTERM, on_signal as libc::sighandler_t);
+        libc::signal(libc::SIGINT, on_signal as *const () as libc::sighandler_t);
+        libc::signal(libc::SIGTERM, on_signal as *const () as libc::sighandler_t);
     }
 }
 
 use anyhow::{bail, Context, Result};
-use std::io::Write as _;
 use clap::Parser;
-use common::{Detection, Frame, PixelFormat};
+use common::Detection;
 use nano_track::imgops::Img;
-use pipeline::{HybridConfig, HybridTracker, Mode, TargetState};
+use pipeline::{HybridConfig, HybridTracker, Mode};
 use serde::Serialize;
 
 use crate::config::AppConfig;
@@ -753,15 +752,15 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
     #[allow(clippy::too_many_arguments)]
     fn run_camera(
         &self,
-        cfg: &AppConfig,
-        hybrid: &mut HybridTracker,
-        stream: Option<&StreamCtx>,
-        mut commander: Option<&mut CommanderCtx>,
-        det_req_tx: &std_mpsc::SyncSender<(Vec<u8>, u32, u32, u64)>,
-        det_resp_rx: &std_mpsc::Receiver<Result<DetectResult, String>>,
-        stats: &mut RunStats,
-        telemetry: &mut std::fs::File,
-        deadline: Option<Instant>,
+        _cfg: &AppConfig,
+        _hybrid: &mut HybridTracker,
+        _stream: Option<&StreamCtx>,
+        _commander: Option<&mut CommanderCtx>,
+        _det_req_tx: &std_mpsc::SyncSender<(Vec<u8>, u32, u32, u64)>,
+        _det_resp_rx: &std_mpsc::Receiver<Result<DetectResult, String>>,
+        _stats: &mut RunStats,
+        _telemetry: &mut std::fs::File,
+        _deadline: Option<Instant>,
     ) -> Result<()> {
         #[cfg(target_os = "linux")]
         {
@@ -916,6 +915,7 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
         // эмулируем ответы прямо здесь.
         let (w, h) = (640u32, 480u32);
         let mut seq = 0u64;
+        #[allow(unused_assignments)] // fps перезаписывается счётчиком до чтения
         let (mut fps, mut track_ms, mut det_ms) = (0f32, 0f32, None);
         let mut fps_counter = FpsCounter::new();
         let t0 = Instant::now();
@@ -1000,6 +1000,7 @@ fn noisy(mut b: common::BBox, amp: f32) -> common::BBox {
 /// размера, но содержимое — реплика одной сцены 3×3. У живой сцены соседние
 /// девятые кадра различаются заметно сильнее, чем копии. Возврат: (tiled,
 /// средняя |разность|). Однородная сцена (стена) не детектируется намеренно.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))] // используется только стартовым гвардом камеры
 fn frame_tiled_replication(rgb: &[u8], w: u32, h: u32) -> (bool, f32) {
     let (w, h) = (w as usize, h as usize);
     if w < 24 || h < 24 || rgb.len() < w * h * 3 {
@@ -1110,7 +1111,7 @@ fn serde_json_line(line: &TelemetryLine) -> String {
 fn encode_jpeg_bytes(rgb: &[u8], w: u32, h: u32, quality: u8) -> Result<Vec<u8>> {
     let mut out = Vec::with_capacity(rgb.len() / 6);
     {
-        let mut encoder = jpeg_encoder::Encoder::new(&mut out, quality);
+        let encoder = jpeg_encoder::Encoder::new(&mut out, quality);
         let mut planar = Vec::with_capacity(rgb.len());
         let mut r = Vec::with_capacity(rgb.len() / 3);
         let mut g = Vec::with_capacity(rgb.len() / 3);

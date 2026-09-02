@@ -131,6 +131,7 @@ pub struct YoloDecoder {
     /// Число классов, выведенное из формы выходов.
     pub num_classes: usize,
     /// Для SingleHead: (rows = 4+Nc, anchors).
+    #[allow(dead_code)] // хранится для диагностики layout
     single_shape: (usize, usize),
 }
 

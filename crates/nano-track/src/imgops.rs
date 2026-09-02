@@ -80,8 +80,8 @@ pub fn get_subwindow(src: &Img, cx: f32, cy: f32, original_sz: i32, resize_sz: u
 
     let left_pad = (-context_xmin).max(0);
     let top_pad = (-context_ymin).max(0);
-    let right_pad = (context_xmax - img_w + 1).max(0);
-    let bottom_pad = (context_ymax - img_h + 1).max(0);
+    let _right_pad = (context_xmax - img_w + 1).max(0);
+    let _bottom_pad = (context_ymax - img_h + 1).max(0);
 
     let x_min = context_xmin + left_pad;
     let x_max = context_xmax + left_pad;
