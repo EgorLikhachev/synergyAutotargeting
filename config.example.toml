@@ -68,4 +68,7 @@ reverse_x = false
 reverse_y = false
 throttle_us = 1310         # ch3
 aux1_us = 1950             # ch4 (ARM-уровень)
+lead_s = 0.0               # упреждение наведения, с (0 — выкл)
+lead_alpha = 0.25          # сглаживание оценки скорости цели
+stick_rate_px_s = 600.0    # скорость платформы при полном стике (фидфорвард)
 simulate = false           # true — без UART (тесты контура)

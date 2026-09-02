@@ -80,6 +80,12 @@ pub struct HybridTracker {
     pub detect_inflight: bool,
 }
 
+/// Решение о детекции: по расписанию раз в N кадров, а при потере — каждый
+/// кадр (ре-захват ограничен только скоростью NPU; soak: медиана 19 мс).
+fn should_detect(frame_idx: u64, every_n: u32, lost: bool) -> bool {
+    lost || frame_idx % every_n.max(1) as u64 == 0
+}
+
 impl HybridTracker {
     pub fn new(tracker: NanoTracker, config: HybridConfig) -> Self {
         Self {
@@ -96,11 +102,10 @@ impl HybridTracker {
 
     /// Нужна ли детекция на этом кадре (по расписанию или из-за потери цели).
     pub fn wants_detection(&self, frame_idx: u64) -> bool {
-        let scheduled = frame_idx % self.config.detect_every_n.max(1) as u64 == 0;
         let lost = self.last_bbox.is_none()
             || self.low_score_streak >= self.config.lost_patience
             || !self.tracker.is_initialized();
-        scheduled || lost
+        should_detect(frame_idx, self.config.detect_every_n, lost)
     }
 
     /// Подать результаты детекции (вызываются когда детектор ответил).
@@ -245,6 +250,18 @@ impl HybridTracker {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lost_state_detects_every_frame() {
+        // Потеря цели — детекция каждый кадр: ре-захват ограничен только
+        // скоростью NPU (soak: медиана 19 мс при 60 FPS; ROADMAP <100 мс).
+        for i in 0..25u64 {
+            assert!(should_detect(i, 10, true), "кадр {i}: в LOST детекция нужна каждый кадр");
+        }
+        // В сопровождении — строго по расписанию.
+        let hits: Vec<u64> = (0..30).filter(|&i| should_detect(i, 10, false)).collect();
+        assert_eq!(hits, vec![0, 10, 20]);
+    }
 
     #[test]
     fn wants_detection_schedule() {

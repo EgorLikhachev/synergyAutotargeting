@@ -91,6 +91,47 @@ impl Axis {
     }
 }
 
+/// Предиктор упреждения (ROADMAP-D). Скорость цели оценивается в МИРЕ:
+/// кадр движется вместе с платформой, поэтому мировая скорость цели =
+/// скорость в кадре + скорость платформы (фидфорвард из нашей же RC-команды
+/// × масштаб стика). Точка прицеливания выносится вперёд на lead_s секунд.
+pub struct LeadPredictor {
+    pos: Option<(f32, f32)>,
+    /// Оценка мировой скорости цели, px/с.
+    vel: (f32, f32),
+    /// Сглаживание оценки скорости (0..1): меньше — спокойнее.
+    pub alpha: f32,
+    /// Горизонт упреждения, с.
+    pub lead_s: f32,
+}
+
+impl LeadPredictor {
+    pub fn new(alpha: f32, lead_s: f32) -> Self {
+        Self { pos: None, vel: (0.0, 0.0), alpha: alpha.clamp(0.01, 1.0), lead_s }
+    }
+
+    /// Наблюдение центра цели в кадре + оценка скорости платформы (px/с).
+    /// Возвращает точку прицеливания с упреждением.
+    pub fn observe(&mut self, p: (f32, f32), dt: f32, platform_vel: (f32, f32)) -> (f32, f32) {
+        if let Some(prev) = self.pos.replace(p) {
+            let dt = dt.max(1e-3);
+            // мировая скорость = относительная (в кадре) + платформа
+            let inst = (
+                (p.0 - prev.0) / dt + platform_vel.0,
+                (p.1 - prev.1) / dt + platform_vel.1,
+            );
+            self.vel.0 += self.alpha * (inst.0 - self.vel.0);
+            self.vel.1 += self.alpha * (inst.1 - self.vel.1);
+        }
+        (p.0 + self.vel.0 * self.lead_s, p.1 + self.vel.1 * self.lead_s)
+    }
+
+    pub fn reset(&mut self) {
+        self.pos = None;
+        self.vel = (0.0, 0.0);
+    }
+}
+
 /// Конфиг маппинга осей на RC-каналы (порты из bkb: roll→ch0, pitch→ch1,
 /// yaw→ch2, throttle→ch3, aux1=ch4 — ARM).
 #[derive(Debug, Clone, Copy)]
@@ -104,6 +145,11 @@ pub struct AimConfig {
     /// Постоянные каналы: throttle (ch3) и aux1 (ch4, ARM-уровень).
     pub throttle_us: u16,
     pub aux1_us: u16,
+    /// Упреждение: горизонт, с (0 — выкл) и сглаживание скорости.
+    pub lead_s: f32,
+    pub lead_alpha: f32,
+    /// Скорость платформы при полном стике, px/с (для фидфорварда упреждения).
+    pub stick_rate_px_s: f32,
 }
 
 impl Default for AimConfig {
@@ -114,6 +160,9 @@ impl Default for AimConfig {
             swap_axes: false,
             throttle_us: 1310,
             aux1_us: 1950,
+            lead_s: 0.0,
+            lead_alpha: 0.25,
+            stick_rate_px_s: 600.0,
         }
     }
 }
@@ -125,21 +174,33 @@ pub struct AimLaw {
     cfg: AimConfig,
     ax: Axis,
     ay: Axis,
+    lead: LeadPredictor,
+    /// Прошлая RC-команда — оценка скорости платформы для упреждения.
+    last_ch: [u16; 16],
 }
 
 impl AimLaw {
     pub fn new(cfg: AimConfig) -> Self {
+        let lead = LeadPredictor::new(cfg.lead_alpha, cfg.lead_s);
         let (ax, ay) = (Axis::new(cfg.x), Axis::new(cfg.y));
-        Self { cfg, ax, ay }
+        Self { cfg, ax, ay, lead, last_ch: msp::center_channels() }
     }
 
     /// `target_px` — (x, y) центра цели в пикселях; `frame` — (w, h).
     /// Возврат: 16 каналов RC (мкс).
     pub fn update(&mut self, target_px: (f32, f32), frame: (u32, u32), dt: f32) -> [u16; 16] {
         let (cx, cy) = (frame.0 as f32 / 2.0, frame.1 as f32 / 2.0);
+        // Скорость платформы из прошлой команды (rate-режим: стик ≈ скорость).
+        let scale = self.cfg.stick_rate_px_s / 500.0;
+        let platform_vel = (
+            (self.last_ch[0] as f32 - 1500.0) * scale,
+            (self.last_ch[1] as f32 - 1500.0) * scale,
+        );
+        // Точка прицеливания: цель с упреждением по мировой скорости.
+        let aim = self.lead.observe(target_px, dt, platform_vel);
         let err = (
-            target_px.0 - cx, // вправо — положительно
-            target_px.1 - cy, // вниз — положительно
+            aim.0 - cx, // вправо — положительно
+            aim.1 - cy, // вниз — положительно
         );
         let ch_x = self.ax.update(err.0, cx, dt);
         let ch_y = self.ay.update(err.1, cy, dt);
@@ -154,6 +215,7 @@ impl AimLaw {
         }
         ch[3] = self.cfg.throttle_us;
         ch[4] = self.cfg.aux1_us;
+        self.last_ch = ch;
         ch
     }
 
@@ -161,6 +223,7 @@ impl AimLaw {
     pub fn lost(&mut self) -> [u16; 16] {
         self.ax.reset();
         self.ay.reset();
+        self.lead.reset();
         let mut ch = msp::center_channels();
         ch[3] = self.cfg.throttle_us;
         ch[4] = self.cfg.aux1_us;

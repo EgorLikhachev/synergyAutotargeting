@@ -169,6 +169,43 @@ mod tests {
         assert!(median < 30.0, "медиана ошибки {median} px > 30");
     }
 
+    /// Упреждение должно СНИЖАТЬ ошибку на движущейся цели (прирост качества
+    /// контура) — сравниваем медиану ошибки с lead и без.
+    #[test]
+    fn lead_predictor_improves_moving_tracking() {
+        fn median_err(lead_s: f32) -> f32 {
+            let mut sim = PlatformSim::new(600.0, 0.25);
+            let mut law = AimLaw::new(AimConfig {
+                x: crate::law::AxisParams { kp: 2.0, kd: 0.15, slew_us: 40.0, ..Default::default() },
+                y: crate::law::AxisParams { kp: 2.0, kd: 0.15, slew_us: 40.0, ..Default::default() },
+                lead_s,
+                stick_rate_px_s: 600.0, // как в PlatformSim::new
+                ..Default::default()
+            });
+            let frame = (640u32, 480u32);
+            let dt = 1.0 / 30.0;
+            let mut errs = Vec::new();
+            for i in 0..900 {
+                let t = i as f32 * dt;
+                let target = (150.0 * (0.5 * t).sin(), 100.0 * (0.8 * t).cos());
+                let tp = sim.target_in_frame(frame, target);
+                errs.push(((tp.0 - 320.0).abs()).max((tp.1 - 240.0).abs()));
+                let ch = law.update(tp, frame, dt);
+                sim.step(&ch, dt);
+            }
+            let mut srt = errs[300..].to_vec();
+            srt.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            srt[srt.len() / 2]
+        }
+        let without = median_err(0.0);
+        let with_lead = median_err(0.15);
+        // На инерционной платформе упреждение обязано дать измеримый выигрыш.
+        assert!(
+            with_lead < without * 0.9,
+            "упреждение не помогло: без {without:.1} px, с {with_lead:.1} px"
+        );
+    }
+
     #[test]
     fn noop_link_counts() {
         let mut l = NoopLink::new();

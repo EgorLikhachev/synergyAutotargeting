@@ -197,6 +197,11 @@ pub struct CommanderConfig {
     pub aux1_us: u16,
     /// Симулятор вместо UART (тесты контура без железа).
     pub simulate: bool,
+    /// Упреждение наведения: горизонт (с, 0 — выкл) и сглаживание скорости.
+    pub lead_s: f32,
+    pub lead_alpha: f32,
+    /// Скорость платформы при полном стике, px/с (фидфорвард упреждения).
+    pub stick_rate_px_s: f32,
 }
 
 impl Default for CommanderConfig {
@@ -217,6 +222,9 @@ impl Default for CommanderConfig {
             throttle_us: 1310,
             aux1_us: 1950,
             simulate: false,
+            lead_s: 0.0,
+            lead_alpha: 0.25,
+            stick_rate_px_s: 600.0,
         }
     }
 }

@@ -183,6 +183,9 @@ impl CommanderCtx {
             swap_axes: c.swap_axes,
             throttle_us: c.throttle_us,
             aux1_us: c.aux1_us,
+            lead_s: c.lead_s,
+            lead_alpha: c.lead_alpha,
+            stick_rate_px_s: c.stick_rate_px_s,
         });
         let link: Box<dyn commander::AimLink> = if c.simulate {
             tracing::info!("коммандер: РЕЖИМ СИМУЛЯЦИИ (UART отключён)");
