@@ -91,6 +91,10 @@ def main():
     else:
         print("повторных захватов: 0 (потерь не было)")
 
+    e2e = [r["e2e_ms"] for r in rows if r.get("e2e_ms") is not None]
+    if e2e:
+        print(f"e2e_ms (кадр→бокс): медиана {statistics.median(e2e):.2f} | p95 {pct(e2e, 0.95):.2f}")
+
     det = [r for r in rows if r.get("det_ms") is not None]
     if det:
         dm = [r["det_ms"] for r in det]

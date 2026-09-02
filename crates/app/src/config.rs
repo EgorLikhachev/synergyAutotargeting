@@ -40,6 +40,8 @@ pub struct DetectorConfig {
     pub nms_threshold: f32,
     /// Имена классов модели (по эмпирическим данным M3; пусто — class_N).
     pub class_names: Vec<String>,
+    /// Пер-класс пороги {class_id: conf}; класс без записи — conf_threshold.
+    pub class_thresholds: std::collections::HashMap<u32, f32>,
 }
 
 impl Default for DetectorConfig {
@@ -50,6 +52,7 @@ impl Default for DetectorConfig {
             conf_threshold: 0.45,
             nms_threshold: 0.45,
             class_names: Vec::new(),
+            class_thresholds: std::collections::HashMap::new(),
         }
     }
 }

@@ -134,6 +134,8 @@ struct TelemetryLine {
     #[serde(skip_serializing_if = "Option::is_none")]
     det_ms: Option<f32>,
     fps: f32,
+    /// Полная латентность кадр→бокс (получение кадра → трек готов), мс.
+    e2e_ms: f32,
 }
 
 struct RunStats {
@@ -573,6 +575,9 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
         fps: f32,
         track_ms: &mut f32,
         det_ms: &mut Option<f32>,
+        frame_recv: Instant,
+        detections_log: &mut Option<std::fs::File>,
+        last_dets: &mut Vec<Detection>,
     ) -> Result<bool> {
         let mut last_det_conf = 0.0f32;
         // Демо-режим: синтетическая детекция в центре кадра — проверка
@@ -619,7 +624,41 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
                 match resp {
                     Ok(r) => {
                         *det_ms = Some(r.infer_ms);
-                        last_det_conf = r.detections.iter().map(|d| d.confidence).fold(0.0f32, f32::max);
+                        // пер-класс пороги (фаза A): класс без записи — глобальный
+                        let dets: Vec<Detection> = r
+                            .detections
+                            .iter()
+                            .filter(|d| {
+                                let t = cfg
+                                    .detector
+                                    .class_thresholds
+                                    .get(&d.class_id)
+                                    .copied()
+                                    .unwrap_or(cfg.detector.conf_threshold);
+                                d.confidence >= t
+                            })
+                            .cloned()
+                            .collect();
+                        last_det_conf = dets.iter().map(|d| d.confidence).fold(0.0f32, f32::max);
+                        *last_dets = dets.clone();
+                        if let Some(f) = detections_log.as_mut() {
+                            let ts = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .map(|d| d.as_millis() as u64)
+                                .unwrap_or(0);
+                            for d in &dets {
+                                let l = format!(
+                                    "{{\"ts_ms\":{ts},\"frame_seq\":{seq},\"class\":{},\"conf\":{:.3},\"x\":{},\"y\":{},\"w\":{},\"h\":{}}}",
+                                    d.class_id, d.confidence,
+                                    d.bbox.x as i32, d.bbox.y as i32,
+                                    d.bbox.w as i32, d.bbox.h as i32
+                                );
+                                let _ = f.write_all(l.as_bytes());
+                                let _ = f.write_all(b"
+");
+                            }
+                        }
+                        let r = DetectResult { detections: dets, infer_ms: r.infer_ms, frame_seq: r.frame_seq };
                         stats.detect_us_total += (r.infer_ms * 1000.0) as u128;
                         if !r.detections.is_empty() {
                             stats.detections_hits += 1;
@@ -644,6 +683,8 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
         let img = Img::new(rgb.clone(), w, h);
         let state = hybrid.on_frame(&img);
         let tus = t0.elapsed().as_micros();
+        // Полная латентность: получение кадра (до декодирования) → бокс готов.
+        let e2e_us = frame_recv.elapsed().as_micros();
         stats.track_us_total += tus;
         *track_ms = tus as f32 / 1000.0;
         stats.frames += 1;
@@ -696,6 +737,11 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
                 1,
             );
         }
+        // Сырые детекции (все, не только сопровождаемая цель) — красным,
+        // тонкая рамка: визуальная отладка детектора в стриме (фаза A).
+        for d in last_dets.iter() {
+            osd::draw_rect(&mut rgb, w, h, &d.bbox, osd::Rgb::Red, 1);
+        }
         if seq % cfg.output.snapshot_every.max(1) as u64 == 0 {
             let path = format!("{}/frame_{seq:06}.jpg", cfg.output.dir);
             if let Err(e) = save_jpeg(&rgb, w, h, &path) {
@@ -741,6 +787,7 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
                 track_ms: (*track_ms * 100.0).round() / 100.0,
                 det_ms: det_ms.map(|v| (v * 100.0).round() / 100.0),
                 fps: (fps * 10.0).round() / 10.0,
+                e2e_ms: (e2e_us as f32 / 1000.0 * 100.0).round() / 100.0,
             };
             let mut s = serde_json_line(&line);
             s.push('\n');
@@ -876,6 +923,7 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
                     frame.metadata.height,
                     frame.metadata.seq,
                 );
+                let frame_recv = Instant::now(); // e2e: до декодирования
                 let rgb_frame: Frame = if frame.metadata.format == PixelFormat::Mjpeg {
                     decode_mjpeg_to_rgb(&frame).context("декодирование MJPEG")?
                 } else {
@@ -885,6 +933,7 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
                 self.process_frame(
                     cfg, hybrid, stream, commander.as_deref_mut(), det_req_tx, det_resp_rx, stats, telemetry,
                     rgb_frame.data, w, h, seq, fps, &mut track_ms, &mut det_ms,
+                    frame_recv, &mut det_log, &mut last_dets,
                 )?;
                 let _ = started;
             }
@@ -915,6 +964,8 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
         // эмулируем ответы прямо здесь.
         let (w, h) = (640u32, 480u32);
         let mut seq = 0u64;
+        let mut det_log = open_detections_log(cfg);
+        let mut last_dets: Vec<Detection> = Vec::new();
         #[allow(unused_assignments)] // fps перезаписывается счётчиком до чтения
         let (mut fps, mut track_ms, mut det_ms) = (0f32, 0f32, None);
         let mut fps_counter = FpsCounter::new();
@@ -953,9 +1004,11 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
             let _ = det_req_tx;
             let _ = det_resp_rx;
             fps = fps_counter.tick();
+            let frame_recv = Instant::now();
             self.process_frame(
                 cfg, hybrid, stream, commander.as_deref_mut(), det_req_tx, det_resp_rx, stats, telemetry,
                 frame.data, w, h, seq, fps, &mut track_ms, &mut det_ms,
+                frame_recv, &mut det_log, &mut last_dets,
             )?;
             seq += 1;
             std::thread::sleep(Duration::from_millis(33)); // ~30 FPS
@@ -988,6 +1041,15 @@ impl FpsCounter {
         }
         self.last
     }
+}
+
+/// Открыть data/detections.jsonl (рядом с телеметрией).
+fn open_detections_log(cfg: &AppConfig) -> Option<std::fs::File> {
+    if !cfg.output.telemetry {
+        return None;
+    }
+    let path = format!("{}/detections.jsonl", cfg.output.dir);
+    std::fs::File::create(&path).ok()
 }
 
 fn noisy(mut b: common::BBox, amp: f32) -> common::BBox {
