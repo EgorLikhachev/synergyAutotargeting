@@ -9,4 +9,4 @@ license.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
-serialport = "4"
+serialport = { version = "4", default-features = false } # libudev не нужен: открываем порт по пути
