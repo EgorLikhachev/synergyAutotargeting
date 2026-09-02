@@ -160,6 +160,8 @@ pub struct StreamConfig {
     pub quality: u8,
     /// Запись стрима в файл (M-JPEG, конкатенация кадров); пусто — выкл.
     pub record: String,
+    /// H.264-запись (mpph264enc, .mkv); пусто — выкл.
+    pub record_h264: String,
 }
 
 impl Default for StreamConfig {
@@ -171,6 +173,7 @@ impl Default for StreamConfig {
             frame_div: 2,
             quality: 80,
             record: String::new(),
+            record_h264: String::new(),
         }
     }
 }

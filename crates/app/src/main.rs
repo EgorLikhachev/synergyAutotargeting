@@ -76,6 +76,9 @@ struct Args {
     /// Тряска камеры в синтетике, px (стенд GMC-стабилизации).
     #[arg(long, default_value_t = 0.0)]
     shake: f32,
+    /// Записать стрим OSD в H.264 файл (аппаратный mpph264enc, .mkv).
+    #[arg(long, value_name = "PATH")]
+    record_h264: Option<String>,
     /// Записать стрим OSD в M-JPEG файл (путь; расширение .mjpg).
     #[arg(long, value_name = "PATH")]
     record: Option<String>,
@@ -109,6 +112,10 @@ fn main() -> Result<()> {
     if let Some(r) = &args.record {
         cfg.stream.record = r.clone();
         cfg.stream.enabled = true; // запись идёт через стрим-энкодер
+    }
+    if let Some(r) = &args.record_h264 {
+        cfg.stream.record_h264 = r.clone();
+        cfg.stream.enabled = true;
     }
     if args.shake > 0.0 {
         cfg.synthetic.shake_px = args.shake;
@@ -349,6 +356,21 @@ impl Runner {
             let quality = cfg.stream.quality;
             let srv = server.clone();
             let psh = push.clone();
+            #[cfg(target_os = "linux")]
+            let h264 = if cfg.stream.record_h264.is_empty() {
+                None
+            } else {
+                match spawn_h264_gst(&cfg.stream.record_h264) {
+                    Ok(pair) => {
+                        tracing::info!(path = %cfg.stream.record_h264, "H.264-запись (mpph264enc)");
+                        Some(pair)
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "H.264-запись недоступна (gst-launch/mpph264enc?)");
+                        None
+                    }
+                }
+            };
             let mut rec_file = if cfg.stream.record.is_empty() {
                 None
             } else {
@@ -364,6 +386,14 @@ impl Runner {
                 }
             };
             // Кодирование — вне бюджетного потока кадра (§8 HARDWARE_TEST_RESULTS).
+            #[cfg(target_os = "linux")]
+            let (h264_child, mut h264_stdin) = match h264 {
+                Some((child, stdin)) => (Some(child), Some(stdin)),
+                None => (None, None),
+            };
+            #[cfg(target_os = "linux")]
+            let recording = rec_file.is_some() || h264_stdin.is_some();
+            #[cfg(not(target_os = "linux"))]
             let recording = rec_file.is_some();
             let _enc = std::thread::Builder::new()
                 .name("mjpeg-encoder".into())
@@ -373,6 +403,13 @@ impl Runner {
                             Ok(j) => {
                                 if let Some(f) = rec_file.as_mut() {
                                     let _ = f.write_all(&j); // M-JPEG: кадры подряд
+                                }
+                                #[cfg(target_os = "linux")]
+                                if let Some(stdin) = h264_stdin.as_mut() {
+                                    let nv12 = rgb24_to_nv12(&rgb, w, h);
+                                    if stdin.write_all(&nv12).is_err() {
+                                        tracing::warn!("H.264-конвейер оборвался");
+                                    }
                                 }
                                 if let Some(s) = &srv {
                                     if s.clients() > 0 {
@@ -388,7 +425,15 @@ impl Runner {
                     }
                 })
                 .context("spawn mjpeg-encoder")?;
-            Some(StreamCtx { server, push, enc_tx, frame_div: cfg.stream.frame_div, recording })
+            #[cfg(target_os = "linux")]
+            let _h264_child = h264_child; // Child в scope: Drop по завершении run()
+            Some(StreamCtx {
+                server,
+                push,
+                enc_tx,
+                frame_div: cfg.stream.frame_div,
+                recording,
+            })
         } else {
             None
         };
@@ -1071,6 +1116,45 @@ impl FpsCounter {
     }
 }
 
+/// Поднять gst-конвейер аппаратного H.264: stdin(JPEG) → jpegdec →
+/// mpph264enc → matroskamux → файл. Возвращает ребёнка и stdin.
+#[cfg(target_os = "linux")]
+fn spawn_h264_gst(path: &str) -> Result<(std::process::Child, std::process::ChildStdin)> {
+    use std::io::Write as _;
+    use std::process::{Command, Stdio};
+    let mut child = Command::new("gst-launch-1.0")
+        .args([
+            "-e",
+            "fdsrc",
+            "!",
+            // JPEG-элементы gst на этой вендорной сборке нерабочи —
+            // кормим сырым NV12 через rawvideoparse (проверено 2026-09-03).
+            "rawvideoparse",
+            "use-sink-caps=false",
+            "format=nv12",
+            "width=640",
+            "height=480",
+            "framerate=30/1",
+            "!",
+            "mpph264enc",
+            "bps=2000000",
+            "!",
+            "h264parse",
+            "!",
+            "matroskamux",
+            "!",
+            "filesink",
+            &format!("location={path}"),
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .with_context(|| "запуск gst-launch (пакет gstreamer1.0-rockchip1)")?;
+    let stdin = child.stdin.take().context("stdin gst")?;
+    Ok((child, stdin))
+}
+
 /// Открыть data/detections.jsonl (рядом с телеметрией).
 fn open_detections_log(cfg: &AppConfig) -> Option<std::fs::File> {
     if !cfg.output.telemetry {
@@ -1196,6 +1280,39 @@ fn serde_json_line(line: &TelemetryLine) -> String {
         line.fps,
         line.e2e_ms
     )
+}
+
+/// RGB24 → NV12 (Y плоскость + чересстрочная UV), для аппаратного H.264.
+fn rgb24_to_nv12(rgb: &[u8], w: u32, h: u32) -> Vec<u8> {
+    let (w, h) = (w as usize, h as usize);
+    let mut out = vec![0u8; w * h * 3 / 2];
+    let (y_plane, uv_plane) = out.split_at_mut(w * h);
+    for yy in 0..h {
+        for xx in 0..w {
+            let i = (yy * w + xx) * 3;
+            let (r, g, b) = (rgb[i] as i32, rgb[i + 1] as i32, rgb[i + 2] as i32);
+            y_plane[yy * w + xx] = ((77 * r + 150 * g + 29 * b) >> 8) as u8;
+        }
+    }
+    for yy in 0..h / 2 {
+        for xx in 0..w / 2 {
+            let base = (2 * yy * w + 2 * xx) * 3;
+            let (mut sr, mut sg, mut sb) = (0i32, 0i32, 0i32);
+            for dy in 0..2 {
+                for dx in 0..2 {
+                    let i = base + (dy * w + dx) * 3;
+                    sr += rgb[i] as i32;
+                    sg += rgb[i + 1] as i32;
+                    sb += rgb[i + 2] as i32;
+                }
+            }
+            let (r, g, b) = (sr >> 2, sg >> 2, sb >> 2);
+            let uv = (yy * (w / 2) + xx) * 2;
+            uv_plane[uv] = (((-43 * r - 85 * g + 128 * b) >> 8) + 128) as u8;
+            uv_plane[uv + 1] = (((128 * r - 107 * g - 21 * b) >> 8) + 128) as u8;
+        }
+    }
+    out
 }
 
 /// RGB24 → JPEG в память (планарная укладка для jpeg-encoder).
