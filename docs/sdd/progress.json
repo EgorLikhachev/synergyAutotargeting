@@ -30,6 +30,7 @@
       "notes": "полный цикл C на железе: 1132 кадра, 28.3 FPS, 100% TRACKING, 114 handoff'ов detect→track, OSD (рамка+текст) в JPEG-снапшотах, телеметрия JSONL" },
     { "id": "M6", "title": "soak-тест + HARDWARE_TEST_RESULTS", "status": "done",
       "notes": "330с: 9488 кадров, 28.7 FPS, 100% TRACKING, score 0.78-0.85, track 30.5мс без деградации, 0 ошибок; найден и закрыт shutdown-дедлок (let _ = не роняет канал); выход по duration и SIGTERM проверены" },
-    { "id": "M7", "title": "стрим/коммандер-скаффолд", "status": "pending" }
+    { "id": "M7", "title": "стрим/коммандер-скаффолд", "status": "partial",
+      "notes": "стрим OSD готов: MJPEG-over-HTTP (крейт streaming, чистый Rust), 15.3 FPS / 3.3 Мбит/с к зрителю, просадка пайплайна 0.1 FPS; просмотр через SSH-туннель (quirk ядра: входящие TCP к user-портам при активном NPU не проходят, ADR-009); mpph264enc проверен, H.264 отложен; коммандер/PID не начат" }
   ]
 }

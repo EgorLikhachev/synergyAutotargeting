@@ -118,12 +118,16 @@ impl MjpegServer {
                 for stream in listener.incoming() {
                     match stream {
                         Ok(s) => {
+                            eprintln!("[MJPEG] accept: {}", s.peer_addr().map(|a| a.to_string()).unwrap_or_default());
                             let hub = hub_accept.clone();
                             let _ = std::thread::Builder::new()
                                 .name("mjpeg-client".into())
                                 .spawn(move || serve_client(s, hub));
                         }
-                        Err(_) => break,
+                        Err(e) => {
+                            eprintln!("[MJPEG] accept ошибка: {e}");
+                            break;
+                        }
                     }
                 }
             })?;
@@ -153,17 +157,20 @@ impl MjpegServer {
 }
 
 fn serve_client(mut stream: TcpStream, hub: Arc<Hub>) {
+    let peer = stream.peer_addr().map(|a| a.to_string()).unwrap_or_default();
     let _ = stream.set_nodelay(true);
     let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
     // Съесть HTTP-запрос (браузер шлёт GET; путь/заголовки не важны).
     let mut buf = [0u8; 2048];
-    let _ = stream.read(&mut buf);
+    let n = stream.read(&mut buf).unwrap_or(0);
+    eprintln!("[MJPEG] {peer}: connect, запрос {n} байт");
 
     let head = b"HTTP/1.0 200 OK\r\n\
                 Content-Type: multipart/x-mixed-replace; boundary=frame\r\n\
                 Cache-Control: no-store\r\n\
                 Connection: close\r\n\r\n";
     if stream.write_all(head).is_err() {
+        eprintln!("[MJPEG] {peer}: head не записан, закрываю");
         return;
     }
 
@@ -171,6 +178,7 @@ fn serve_client(mut stream: TcpStream, hub: Arc<Hub>) {
         let mut inner = hub.inner.lock().unwrap();
         inner.clients += 1;
     }
+    eprintln!("[MJPEG] {peer}: head записан, клиент зарегистрирован");
 
     let mut seen: u64 = 0;
     loop {
@@ -209,6 +217,7 @@ fn serve_client(mut stream: TcpStream, hub: Arc<Hub>) {
         if ok {
             hub.served_frames.fetch_add(1, Ordering::Relaxed);
         } else {
+            eprintln!("[MJPEG] {peer}: обрыв на записи кадра");
             let mut inner = hub.inner.lock().unwrap();
             inner.clients = inner.clients.saturating_sub(1);
             return;
