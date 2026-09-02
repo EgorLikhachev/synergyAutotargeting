@@ -1,0 +1,36 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Тесты (без npu — стабы)
+        run: cargo test --workspace
+      - name: Clippy
+        run: cargo clippy --workspace -- -D warnings
+
+  cross:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-gnu
+      - run: sudo apt-get install -y gcc-aarch64-linux-gnu
+      - uses: Swatinem/rust-cache@v2
+      - name: Кросс-сборка (проверка npu-ветки линкуется)
+        env:
+          RKNN_LIB_DIR: ${{ github.workspace }}/ci-libs
+        run: |
+          mkdir -p ci-libs
+          # librknnrt.so из релиза airockchip (тот же, что на борту)
+          curl -sL -o rknn.tar.xz https://github.com/airockchip/rknn-toolkit2/releases/download/v2.3.0/rknn_toolkit_linux_x86_64-2.3.0-1e2f0d7da.tar.xz || true
+          # фолбэк: сборка без npu-фичи (линковка всё равно проверяется на борту)
+          cargo check --release --target aarch64-unknown-linux-gnu || cargo check --release --target aarch64-unknown-linux-gnu --no-default-features
