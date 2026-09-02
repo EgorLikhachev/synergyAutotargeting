@@ -173,14 +173,30 @@ impl Runner {
             None
         };
 
-        // === Трекер (NanoTrack, tract) ===
-        let nano = nano_track::NanoTracker::new(
-            &cfg.tracker.backbone_path,
-            &cfg.tracker.backbone_search_path,
-            &cfg.tracker.head_path,
-            cfg.tracker.swap_rb,
-        )
-        .context("загрузка моделей NanoTrack")?;
+        // === Трекер (NanoTrack): tract (CPU) или RKNN (NPU, фаза C) ===
+        let nano = match cfg.tracker.backend.trim().to_ascii_lowercase().as_str() {
+            #[cfg(feature = "npu")]
+            "rknn" => {
+                let nets = nano_track::backend_rknn::RknnNets::load(
+                    &cfg.tracker.rknn_backbone_z,
+                    &cfg.tracker.rknn_backbone_x,
+                    &cfg.tracker.rknn_head,
+                    cfg.tracker.swap_rb,
+                )
+                .context("загрузка RKNN-моделей NanoTrack")?;
+                tracing::info!("трекер: бэкенд RKNN (NPU)");
+                nano_track::NanoTracker::with_nets(Box::new(nets))?
+            }
+            _ => {
+                tracing::info!("трекер: бэкенд tract (CPU)");
+                nano_track::NanoTracker::new(
+                    &cfg.tracker.backbone_path,
+                    &cfg.tracker.backbone_search_path,
+                    &cfg.tracker.head_path,
+                    cfg.tracker.swap_rb,
+                )?
+            }
+        };
         let hybrid_cfg = HybridConfig {
             detect_every_n: cfg.pipeline.detect_every_n,
             iou_confirm: cfg.pipeline.iou_confirm,

@@ -11,6 +11,11 @@ tract-onnx.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 anyhow.workspace = true
+rknn-sys = { workspace = true, optional = true }
 
 [dev-dependencies]
 jpeg-decoder.workspace = true
+
+[features]
+# NPU-бэкенд трекера (сборка только на борту: линкует librknnrt).
+npu = ["dep:rknn-sys"]

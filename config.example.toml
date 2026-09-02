@@ -18,11 +18,16 @@ nms_threshold = 0.45
 class_names = []
 
 [tracker]
+backend = "tract"           # "tract" (CPU) | "rknn" (NPU, фаза C — трек <10 мс)
 backbone_path = "models/nanotrack_backbone_127.onnx"
 backbone_search_path = "models/nanotrack_backbone_sim.onnx"
 head_path = "models/nanotrack_head_sim.onnx"
 swap_rb = false
 min_track_score = 0.30
+# RKNN-модели (backend = "rknn"; из tools/convert_nanotrack.py):
+rknn_backbone_z = "models/nanotrack_backbone_127.rknn"
+rknn_backbone_x = "models/nanotrack_backbone_255.rknn"
+rknn_head = "models/nanotrack_head.rknn"
 
 [pipeline]
 detect_every_n = 10        # детекция раз в N кадров (10 => ~3 Гц при 30 FPS)

@@ -55,11 +55,17 @@ impl Default for DetectorConfig {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct TrackerConfig {
-    /// Backbone для шаблона 127×127.
+    /// Нейро-бэкенд трекера: "tract" (CPU) или "rknn" (NPU, фаза C).
+    pub backend: String,
+    /// Модели tract (CPU).
     pub backbone_path: String,
     /// Backbone для поиска 255×255.
     pub backbone_search_path: String,
     pub head_path: String,
+    /// Модели RKNN (NPU; из tools/convert_nanotrack.py).
+    pub rknn_backbone_z: String,
+    pub rknn_backbone_x: String,
+    pub rknn_head: String,
     /// Мы кормим RGB; true нужен только если источник вдруг BGR.
     pub swap_rb: bool,
     pub min_track_score: f32,
@@ -68,9 +74,13 @@ pub struct TrackerConfig {
 impl Default for TrackerConfig {
     fn default() -> Self {
         Self {
+            backend: "tract".into(),
             backbone_path: "models/nanotrack_backbone_127.onnx".into(),
             backbone_search_path: "models/nanotrack_backbone_sim.onnx".into(),
             head_path: "models/nanotrack_head_sim.onnx".into(),
+            rknn_backbone_z: "models/nanotrack_backbone_127.rknn".into(),
+            rknn_backbone_x: "models/nanotrack_backbone_255.rknn".into(),
+            rknn_head: "models/nanotrack_head.rknn".into(),
             swap_rb: false,
             min_track_score: 0.30,
         }

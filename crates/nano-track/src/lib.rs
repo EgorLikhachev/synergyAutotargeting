@@ -10,18 +10,31 @@
 //! Модели: nanotrack_backbone_sim.onnx + nanotrack_head_sim.onnx (из bkb,
 //! origin — OpenCV Zoo). template 127×127, search 255×255, scoreSize 16.
 
+pub mod backend_tract;
+#[cfg(feature = "npu")]
+pub mod backend_rknn;
 pub mod imgops;
 pub mod kalman;
 pub mod stabilizer;
 
+pub use backend_tract::TractNets;
+
 use common::BBox;
-use tract_onnx::prelude::*;
 pub use stabilizer::Stabilizer;
 
-use imgops::{get_subwindow, to_nchw_f32, Img};
+use imgops::{get_subwindow, Img};
 
-/// Псевдоним загруженной tract-модели (стандартная тройка дженериков).
-type Model = RunnableModel<TypedFact, Box<dyn TypedOp>, Graph<TypedFact, Box<dyn TypedOp>>>;
+/// Нейро-бэкенд трекера (ADR-010): tract на CPU или RKNN на NPU (фича npu).
+/// Кропы приходят как RGB Img (u8); бэкенд сам готовит их под свой рантайм.
+/// Выходы — плоские NCHW f32 (паритет с tract-порядком).
+pub trait TrackerNets: Send {
+    /// Backbone шаблона (кроп 127×127) → фичи zf.
+    fn run_backbone_z(&mut self, crop: &Img) -> NanoResult<Vec<f32>>;
+    /// Backbone поиска (кроп 255×255) → фичи xf.
+    fn run_backbone_x(&mut self, crop: &Img) -> NanoResult<Vec<f32>>;
+    /// Голова: (zf, xf) → (cls 2·16·16, bbox 4·16·16).
+    fn run_head(&mut self, zf: &[f32], xf: &[f32]) -> NanoResult<(Vec<f32>, Vec<f32>)>;
+}
 
 /// Ошибки трекера.
 #[derive(Debug, thiserror::Error)]
@@ -62,23 +75,10 @@ impl Default for TrackerConfig {
 }
 
 pub struct NanoTracker {
-    /// Два закреплённых экземпляра backbone: для шаблона 127×127 и поиска
-    /// 255×255. Модель динамическая, и tract при смене размера на живом
-    /// графе конфликтует символами («255 != 127»); фиксированные входы
-    /// позволяют ещё и оптимизировать каждый граф под свой размер.
-    backbone_z: Model,
-    backbone_x: Model,
-    head: Model,
-    /// Позиционные индексы входов головы: (template, search).
-    head_template_input: usize,
-    head_search_input: usize,
-    /// Позиционные индексы выходов головы: (cls, bbox).
-    head_cls_output: usize,
-    head_bbox_output: usize,
+    /// Нейро-бэкенд: tract (CPU) или RKNN (NPU) — ADR-010.
+    nets: Box<dyn TrackerNets>,
     cfg: TrackerConfig,
     score_size: usize,
-    /// Порядок каналов входного блоба: true = BGR→RGB (мы кормим RGB, поэтому false).
-    swap_rb: bool,
 
     // --- состояние цели ---
     target_pos: [f32; 2],
@@ -87,90 +87,31 @@ pub struct NanoTracker {
     hanning: Vec<f32>,
     grid_x: Vec<f32>,
     grid_y: Vec<f32>,
-    template: Option<Tensor>,
+    /// Фичи шаблона (zf) после init — плоские f32, бэкенд-агностичны.
+    template: Option<Vec<f32>>,
     tracking_score: f32,
 }
 
 impl NanoTracker {
-    /// Загрузить модели. `backbone_z_path` — backbone для шаблона 127×127,
-    /// `backbone_x_path` — для поиска 255×255 (модели статические, отдельные).
+    /// Загрузить tract-модели (CPU-бэкенд, работает везде).
     pub fn new(
         backbone_z_path: &str,
         backbone_x_path: &str,
         head_path: &str,
         swap_rb: bool,
     ) -> NanoResult<Self> {
-        let load = |p: &str| -> NanoResult<Model> {
-            tract_onnx::onnx()
-                .model_for_path(p)
-                .map_err(|e| NanoError::ModelLoad {
-                    path: p.to_string(),
-                    source: e.into(),
-                })?
-                .into_typed()
-                .map_err(|e| NanoError::ModelLoad {
-                    path: p.to_string(),
-                    source: e.into(),
-                })?
-                .into_optimized()
-                .map_err(|e| NanoError::ModelLoad {
-                    path: p.to_string(),
-                    source: e.into(),
-                })?
-                .into_runnable()
-                .map_err(|e| NanoError::ModelLoad {
-                    path: p.to_string(),
-                    source: e.into(),
-                })
-        };
-        let backbone_z = load(backbone_z_path)?;
-        let backbone_x = load(backbone_x_path)?;
-        let head = load(head_path)?;
+        let nets = TractNets::load(backbone_z_path, backbone_x_path, head_path, swap_rb)?;
+        Self::with_nets(Box::new(nets))
+    }
 
-        // Определяем смысловые индексы входов/выходов головы по именам.
-        let node_name = |m: &Model, outlet: &OutletId| -> String {
-            m.model().nodes()[outlet.node].name.clone()
-        };
-        let head_in_names: Vec<String> =
-            head.model().inputs.iter().map(|o| node_name(&head, o)).collect();
-        let head_out_names: Vec<String> =
-            head.model().outputs.iter().map(|o| node_name(&head, o)).collect();
-        tracing::info!(
-            inputs = ?head_in_names,
-            outputs = ?head_out_names,
-            "head модели: входы/выходы"
-        );
-
-        let head_template_input = head_in_names
-            .iter()
-            .position(|n| n.contains("input1"))
-            .unwrap_or(0);
-        let head_search_input = head_in_names
-            .iter()
-            .position(|n| n.contains("input2"))
-            .unwrap_or_else(|| (head_in_names.len() - 1).min(1));
-        let head_cls_output = head_out_names
-            .iter()
-            .position(|n| n.contains("output1"))
-            .unwrap_or(0);
-        let head_bbox_output = head_out_names
-            .iter()
-            .position(|n| n.contains("output2"))
-            .unwrap_or_else(|| (head_out_names.len() - 1).min(1));
-
-        let score_size = ((INSTANCE_SIZE as i32 - EXEMPLAR_SIZE as i32) / TOTAL_STRIDE + 8) as usize;
-
+    /// Собрать трекер на произвольном нейро-бэкенде (RKNN на NPU и т.п.).
+    pub fn with_nets(nets: Box<dyn TrackerNets>) -> NanoResult<Self> {
+        let score_size =
+            ((INSTANCE_SIZE as i32 - EXEMPLAR_SIZE as i32) / TOTAL_STRIDE + 8) as usize;
         Ok(Self {
-            backbone_z,
-            backbone_x,
-            head,
-            head_template_input,
-            head_search_input,
-            head_cls_output,
-            head_bbox_output,
+            nets,
             cfg: TrackerConfig::default(),
             score_size,
-            swap_rb,
             target_pos: [0.0; 2],
             target_sz: [0.0; 2],
             img_size: (0, 0),
@@ -197,11 +138,8 @@ impl NanoTracker {
         let sz = (w_extent * h_extent).sqrt() as i32;
 
         let crop = get_subwindow(img, self.target_pos[0], self.target_pos[1], sz, 127);
-        let blob = to_nchw_f32(&crop, self.swap_rb);
-        let input = tensor_from_blob(&blob, 127)?;
-        let feats = self.backbone_z.run(tvec!(TValue::from(input)))?;
-        // Шаблон — это выход backbone с init (вход input1 головы).
-        self.template = Some(feats[0].clone().into_tensor());
+        // Шаблон zf — фичи backbone от кропа 127.
+        self.template = Some(self.nets.run_backbone_z(&crop)?);
 
         self.generate_grids();
         self.tracking_score = 0.0;
@@ -225,25 +163,9 @@ impl NanoTracker {
         self.target_sz[1] *= scale_z;
 
         let crop = get_subwindow(img, self.target_pos[0], self.target_pos[1], sx as i32, 255);
-        let blob = to_nchw_f32(&crop, self.swap_rb);
-        let search = tensor_from_blob(&blob, 255)?;
-        let search_feat = self.backbone_x.run(tvec!(TValue::from(search)))?;
+        let search_feat = self.nets.run_backbone_x(&crop)?;
 
-        // Раскладываем входы головы по вычисленным индексам (их ровно два).
-        let outputs = if self.head_template_input == 0 {
-            self.head.run(tvec!(
-                TValue::from(template),
-                TValue::from(search_feat[0].clone().into_tensor())
-            ))?
-        } else {
-            self.head.run(tvec!(
-                TValue::from(search_feat[0].clone().into_tensor()),
-                TValue::from(template)
-            ))?
-        };
-
-        let cls = flat_f32(&outputs[self.head_cls_output], "cls")?;
-        let bbox_pred = flat_f32(&outputs[self.head_bbox_output], "bbox")?;
+        let (cls, bbox_pred) = self.nets.run_head(&template, &search_feat)?;
 
         let ss = self.score_size;
         if cls.len() != 2 * ss * ss || bbox_pred.len() != 4 * ss * ss {
@@ -408,19 +330,6 @@ fn size_cal(w: f32, h: f32) -> f32 {
 #[inline]
 fn reciprocal_max(v: f32) -> f32 {
     v.max(1.0 / v)
-}
-
-/// Плоское (row-major) чтение выхода tract в Vec<f32>.
-fn flat_f32(v: &TValue, what: &str) -> NanoResult<Vec<f32>> {
-    let arr = v
-        .to_array_view::<f32>()
-        .map_err(|e| NanoError::BadOutputShape(format!("{what}: {e}")))?;
-    Ok(arr.iter().cloned().collect())
-}
-
-fn tensor_from_blob(blob: &[f32], sz: u32) -> NanoResult<Tensor> {
-    Tensor::from_shape(&[1usize, 3, sz as usize, sz as usize], blob)
-        .map_err(|e| NanoError::BadOutputShape(format!("входной тензор: {e}")))
 }
 
 #[cfg(test)]
