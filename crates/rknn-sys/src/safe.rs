@@ -126,8 +126,10 @@ impl RknnModel {
             dims = ?attr.dims.iter().take(attr.n_dims as usize).collect::<Vec<_>>(),
             "вход модели до установки формы"
         );
-        let dynamic = attr.dims.iter().take(attr.n_dims as usize).any(|&d| d == 0);
-        if attr.n_dims == 4 && dynamic {
+        // Всегда пробуем установить форму: динамические модели (в т.ч. с
+        // дефолтами вроде [1,1088,1088,3] у bkb) требуют её явно, статические
+        // вернут ошибку — игнорируем (их форма уже зашита).
+        if attr.n_dims == 4 {
             // Layout по fmt: NHWC → [N,H,W,C] (H,W — dims[1],dims[2]),
             // NCHW → [N,C,H,W] (H,W — dims[2],dims[3]). Реальная модель bkb
             // отдаёт NHWC с формами [1,1088,1088,3] / [1,640,640,3].
@@ -140,11 +142,9 @@ impl RknnModel {
             }
             let ret = unsafe { rknn_set_input_shapes(self.ctx, 1, &mut attr) };
             if ret < 0 {
-                return Err(RknnError::SetInputShapes(ret));
+                tracing::debug!(code = ret, "set_input_shapes отклонён (статическая модель?)");
             }
         }
-        // Статическая модель: формы уже зашиты — set_input_shapes не нужен
-        // (вызов на статике возвращает ошибку и валил воркер детектора).
         Ok(())
     }
 
