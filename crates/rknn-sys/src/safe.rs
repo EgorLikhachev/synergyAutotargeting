@@ -61,6 +61,12 @@ impl RknnModel {
     /// (rknn_set_input_shapes). Для статических моделей применяется
     /// безусловно и должен совпадать со встроенным.
     pub fn load(path: &str, shape: Option<(u32, u32)>) -> RknnResult<Self> {
+        Self::load_on_core(path, shape, RKNN_NPU_CORE_0)
+    }
+
+    /// Загрузка с привязкой к конкретному ядру NPU (0..2); ядро 0 —
+    /// детектор, ядро 1 — трекер (фаза C: развод конкурирующих задач).
+    pub fn load_on_core(path: &str, shape: Option<(u32, u32)>, core: u32) -> RknnResult<Self> {
         let data = fs::read(path)
             .map_err(|e| RknnError::ModelFile(format!("{path}: {e}")))?;
 
@@ -78,9 +84,9 @@ impl RknnModel {
             return Err(RknnError::Init(ret));
         }
 
-        // Ядро NPU 0 — на драйвере 2.3.0 AUTO-планировка наблюдалась
+        // Ядро задаётся явно: на драйвере 2.3.0 AUTO-планировка наблюдалась
         // segfault-ами (перенос из rknn-bridge Autotargeting).
-        let ret = unsafe { rknn_set_core_mask(ctx, RKNN_NPU_CORE_0) };
+        let ret = unsafe { rknn_set_core_mask(ctx, core) };
         if ret < 0 {
             tracing::warn!(code = ret, "rknn_set_core_mask failed, продолжаем");
         }

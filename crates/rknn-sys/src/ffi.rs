@@ -38,6 +38,8 @@ pub const RKNN_TENSOR_NHWC: u32 = 1;
 
 // === core masks (rknn_core_mask) ===
 pub const RKNN_NPU_CORE_0: u32 = 1;
+pub const RKNN_NPU_CORE_1: u32 = 2;
+pub const RKNN_NPU_CORE_2: u32 = 4;
 
 /// rknn_sdk_version
 #[repr(C)]

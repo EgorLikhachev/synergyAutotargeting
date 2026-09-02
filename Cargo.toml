@@ -8,6 +8,7 @@ members = [
     "crates/nano-track",
     "crates/pipeline",
     "crates/streaming",
+    "crates/commander",
     "crates/app",
 ]
 
@@ -39,6 +40,7 @@ detector = { path = "crates/detector" }
 nano-track = { path = "crates/nano-track" }
 pipeline = { path = "crates/pipeline" }
 streaming = { path = "crates/streaming" }
+commander = { path = "crates/commander" }
 
 [profile.release]
 opt-level = 3

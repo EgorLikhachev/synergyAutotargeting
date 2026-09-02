@@ -6,7 +6,7 @@
 
 use crate::{NanoError, NanoResult, TrackerNets};
 use crate::imgops::Img;
-use rknn_sys::{RknnModel, TensorData};
+use rknn_sys::{RknnModel, TensorData, ffi::RKNN_NPU_CORE_1};
 
 pub struct RknnNets {
     z: RknnModel,
@@ -28,10 +28,13 @@ impl RknnNets {
         head_path: &str,
         swap_rb: bool,
     ) -> NanoResult<Self> {
+        // Ядро 1: детектор занимает ядро 0 — разводим конкурирующие задачи.
         let load = |p: &str| {
-            RknnModel::load(p, None).map_err(|e| NanoError::ModelLoad {
-                path: p.to_string(),
-                source: anyhow::anyhow!("{e}"),
+            RknnModel::load_on_core(p, None, RKNN_NPU_CORE_1).map_err(|e| {
+                NanoError::ModelLoad {
+                    path: p.to_string(),
+                    source: anyhow::anyhow!("{e}"),
+                }
             })
         };
         let z = load(z_path)?;

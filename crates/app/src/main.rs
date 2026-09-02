@@ -147,6 +147,89 @@ struct Runner {
     demo_detect: bool,
 }
 
+/// Контур наведения (фаза D): закон + транспорт, отправка по rate_hz.
+struct CommanderCtx {
+    law: commander::AimLaw,
+    link: Box<dyn commander::AimLink>,
+    period: Duration,
+    last_sent: Instant,
+    sent: u64,
+    sim: Option<commander::PlatformSim>,
+}
+
+impl CommanderCtx {
+    fn new(cfg: &AppConfig) -> Result<Self> {
+        let c = &cfg.commander;
+        let axis = |reverse: bool| commander::AxisParams {
+            kp: c.kp,
+            ki: c.ki,
+            kd: c.kd,
+            deadband_px: c.deadband_px,
+            slew_us: c.slew_us,
+            reverse,
+        };
+        let law = commander::AimLaw::new(commander::AimConfig {
+            x: axis(c.reverse_x),
+            y: axis(c.reverse_y),
+            swap_axes: c.swap_axes,
+            throttle_us: c.throttle_us,
+            aux1_us: c.aux1_us,
+        });
+        let link: Box<dyn commander::AimLink> = if c.simulate {
+            tracing::info!("коммандер: РЕЖИМ СИМУЛЯЦИИ (UART отключён)");
+            Box::new(commander::NoopLink::new())
+        } else {
+            match commander::uart::UartLink::open(&c.device, c.baud) {
+                Ok(l) => Box::new(l),
+                Err(e) => {
+                    tracing::warn!(error = %e, "UART недоступен — команды идут в никуда (noop)");
+                    Box::new(commander::NoopLink::new())
+                }
+            }
+        };
+        Ok(Self {
+            law,
+            link,
+            period: Duration::from_secs_f32(1.0 / c.rate_hz.max(1) as f32),
+            last_sent: Instant::now() - Duration::from_secs(1),
+            sent: 0,
+            sim: None,
+        })
+    }
+
+    /// Такт контура: цель в кадре → RC; потеря → центры.
+    fn tick(
+        &mut self,
+        mode: pipeline::Mode,
+        target_px: Option<(f32, f32)>,
+        frame: (u32, u32),
+    ) {
+        let now = Instant::now();
+        if now - self.last_sent < self.period {
+            return;
+        }
+        self.last_sent = now;
+        let dt = self.period.as_secs_f32();
+        let ch = match (mode, target_px) {
+            (pipeline::Mode::Tracking, Some((x, y))) => self.law.update((x, y), frame, dt),
+            _ => self.law.lost(),
+        };
+        if self.link.send_rc(&ch).is_ok() {
+            self.sent += 1;
+        }
+        if let Some(sim) = &mut self.sim {
+            sim.step(&ch, dt);
+            tracing::debug!(
+                sim_x = sim.pos_x,
+                sim_y = sim.pos_y,
+                ch0 = ch[0],
+                ch1 = ch[1],
+                "симуляция платформы"
+            );
+        }
+    }
+}
+
 /// Живой стрим OSD: сервер + канал к потоку-энкодеру JPEG + push-выход.
 struct StreamCtx {
     server: Option<streaming::MjpegServer>,
@@ -288,10 +371,17 @@ impl Runner {
             lost_frames: 0,
         };
 
-        let result = if self.synthetic {
-            self.run_synthetic(&cfg, &mut hybrid, stream_ctx.as_ref(), &det_req_tx, &det_resp_rx, &mut stats, &mut telemetry, deadline)
+        // === Коммандер наведения (фаза D) ===
+        let mut commander_ctx = if cfg.commander.enabled || cfg.commander.simulate {
+            Some(CommanderCtx::new(&cfg)?)
         } else {
-            self.run_camera(&cfg, &mut hybrid, stream_ctx.as_ref(), &det_req_tx, &det_resp_rx, &mut stats, &mut telemetry, deadline)
+            None
+        };
+
+        let result = if self.synthetic {
+            self.run_synthetic(&cfg, &mut hybrid, stream_ctx.as_ref(), commander_ctx.as_mut(), &det_req_tx, &det_resp_rx, &mut stats, &mut telemetry, deadline)
+        } else {
+            self.run_camera(&cfg, &mut hybrid, stream_ctx.as_ref(), commander_ctx.as_mut(), &det_req_tx, &det_resp_rx, &mut stats, &mut telemetry, deadline)
         };
 
         // === Итоги ===
@@ -329,6 +419,9 @@ impl Runner {
         drop(det_resp_rx);
         if let Some(h) = det_handle {
             let _ = h.join();
+        }
+        if let Some(c) = &commander_ctx {
+            println!("коммандер: {} RC-кадров, закон {} (swap_axes={})", c.sent, if cfg.commander.simulate { "СИМУЛЯЦИЯ" } else { "UART/MSP" }, cfg.commander.swap_axes);
         }
         if let Some(st) = &stream_ctx {
             let served = st.server.as_ref().map(|s| s.served_frames()).unwrap_or(0);
@@ -434,11 +527,13 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
     }
 
     #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments)]
     fn process_frame(
         &self,
         cfg: &AppConfig,
         hybrid: &mut HybridTracker,
         stream: Option<&StreamCtx>,
+        mut commander: Option<&mut CommanderCtx>,
         det_req_tx: &std_mpsc::SyncSender<(Vec<u8>, u32, u32, u64)>,
         det_resp_rx: &std_mpsc::Receiver<Result<DetectResult, String>>,
         stats: &mut RunStats,
@@ -561,7 +656,16 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
             }
         }
 
-        // 5) Телеметрия.
+        // 5) Контур наведения: ошибка (цель − центр) → RC (фаза D).
+        if let Some(cmd) = commander.as_deref_mut() {
+            let target = state.bbox.map(|b| {
+                let (cx, cy) = b.center();
+                (cx, cy)
+            });
+            cmd.tick(state.mode, target, (w, h));
+        }
+
+        // 6) Телеметрия.
         if cfg.output.telemetry {
             let line = TelemetryLine {
                 ts_ms: std::time::SystemTime::now()
@@ -590,11 +694,13 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
         Ok(true)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn run_camera(
         &self,
         cfg: &AppConfig,
         hybrid: &mut HybridTracker,
         stream: Option<&StreamCtx>,
+        mut commander: Option<&mut CommanderCtx>,
         det_req_tx: &std_mpsc::SyncSender<(Vec<u8>, u32, u32, u64)>,
         det_resp_rx: &std_mpsc::Receiver<Result<DetectResult, String>>,
         stats: &mut RunStats,
@@ -722,7 +828,7 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
                 };
                 fps = fps_counter.tick();
                 self.process_frame(
-                    cfg, hybrid, stream, det_req_tx, det_resp_rx, stats, telemetry,
+                    cfg, hybrid, stream, commander.as_deref_mut(), det_req_tx, det_resp_rx, stats, telemetry,
                     rgb_frame.data, w, h, seq, fps, &mut track_ms, &mut det_ms,
                 )?;
                 let _ = started;
@@ -736,11 +842,13 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn run_synthetic(
         &self,
         cfg: &AppConfig,
         hybrid: &mut HybridTracker,
         stream: Option<&StreamCtx>,
+        mut commander: Option<&mut CommanderCtx>,
         det_req_tx: &std_mpsc::SyncSender<(Vec<u8>, u32, u32, u64)>,
         det_resp_rx: &std_mpsc::Receiver<Result<DetectResult, String>>,
         stats: &mut RunStats,
@@ -790,7 +898,7 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
             let _ = det_resp_rx;
             fps = fps_counter.tick();
             self.process_frame(
-                cfg, hybrid, stream, det_req_tx, det_resp_rx, stats, telemetry,
+                cfg, hybrid, stream, commander.as_deref_mut(), det_req_tx, det_resp_rx, stats, telemetry,
                 frame.data, w, h, seq, fps, &mut track_ms, &mut det_ms,
             )?;
             seq += 1;

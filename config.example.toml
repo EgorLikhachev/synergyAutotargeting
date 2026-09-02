@@ -51,3 +51,20 @@ push_to = ""               # push-режим: "192.168.0.174:9000" — борт 
                            # исходящие TCP работают даже при quirk ядра)
 frame_div = 2              # отдавать каждый 2-й кадр (~15 FPS)
 quality = 80               # качество JPEG (как у снапшотов)
+
+[commander]
+enabled = false            # контур наведения (фаза D)
+device = "/dev/ttyS6"      # UART полётника (bkb); нет устройства → noop+WARN
+baud = 115200
+rate_hz = 30               # частота RC-кадров (как bkb)
+kp = 2.0                   # усиления осей (X=Y на старте)
+ki = 0.0
+kd = 0.0
+deadband_px = 6.0          # мёртвая зона
+slew_us = 8.0              # лимит шага, мкс/тик
+swap_axes = false          # камера повёрнута на 90° (как в bkb)
+reverse_x = false
+reverse_y = false
+throttle_us = 1310         # ch3
+aux1_us = 1950             # ch4 (ARM-уровень)
+simulate = false           # true — без UART (тесты контура)

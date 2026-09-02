@@ -16,6 +16,7 @@ detector.workspace = true
 nano-track.workspace = true
 pipeline.workspace = true
 streaming.workspace = true
+commander.workspace = true
 rknn-sys.workspace = true
 anyhow.workspace = true
 tracing.workspace = true

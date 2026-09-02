@@ -12,6 +12,7 @@ pub struct AppConfig {
     pub pipeline: PipelineConfig,
     pub output: OutputConfig,
     pub stream: StreamConfig,
+    pub commander: CommanderConfig,
 }
 
 impl Default for AppConfig {
@@ -23,6 +24,7 @@ impl Default for AppConfig {
             pipeline: PipelineConfig::default(),
             output: OutputConfig::default(),
             stream: StreamConfig::default(),
+            commander: CommanderConfig::default(),
         }
     }
 }
@@ -158,6 +160,57 @@ impl Default for StreamConfig {
             push_to: String::new(),
             frame_div: 2,
             quality: 80,
+        }
+    }
+}
+
+/// Коммандер наведения (фаза D, ADR-012): MSP v1 SET_RAW_RC поверх UART.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct CommanderConfig {
+    pub enabled: bool,
+    /// UART-устройство исполнителя (bkb: /dev/ttyS6).
+    pub device: String,
+    pub baud: u32,
+    /// Частота отправки RC, Гц (bkb: 30).
+    pub rate_hz: u32,
+    /// Усиления осей (одинаковы для X/Y на старте).
+    pub kp: f32,
+    pub ki: f32,
+    pub kd: f32,
+    /// Мёртвая зона, px.
+    pub deadband_px: f32,
+    /// Slew-лимит, мкс/тик.
+    pub slew_us: f32,
+    /// Камера повёрнута на 90° — свап осей (bkb).
+    pub swap_axes: bool,
+    pub reverse_x: bool,
+    pub reverse_y: bool,
+    /// Постоянные каналы: throttle (ch3) и aux1 (ch4).
+    pub throttle_us: u16,
+    pub aux1_us: u16,
+    /// Симулятор вместо UART (тесты контура без железа).
+    pub simulate: bool,
+}
+
+impl Default for CommanderConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            device: "/dev/ttyS6".into(),
+            baud: 115200,
+            rate_hz: 30,
+            kp: 2.0,
+            ki: 0.0,
+            kd: 0.0,
+            deadband_px: 6.0,
+            slew_us: 8.0,
+            swap_axes: false,
+            reverse_x: false,
+            reverse_y: false,
+            throttle_us: 1310,
+            aux1_us: 1950,
+            simulate: false,
         }
     }
 }
