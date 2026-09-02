@@ -26,6 +26,7 @@ fn install_signal_handlers() {
 }
 
 use anyhow::{bail, Context, Result};
+use std::io::Write as _;
 use clap::Parser;
 use common::{Detection, Frame, PixelFormat};
 use nano_track::imgops::Img;
@@ -71,6 +72,9 @@ struct Args {
     /// близость выходов на одинаковых кропах, включая проверку layout.
     #[arg(long)]
     diag_nets: bool,
+    /// Записать стрим OSD в M-JPEG файл (путь; расширение .mjpg).
+    #[arg(long, value_name = "PATH")]
+    record: Option<String>,
 }
 
 fn main() -> Result<()> {
@@ -97,6 +101,10 @@ fn main() -> Result<()> {
     }
     if args.stream {
         cfg.stream.enabled = true;
+    }
+    if let Some(r) = &args.record {
+        cfg.stream.record = r.clone();
+        cfg.stream.enabled = true; // запись идёт через стрим-энкодер
     }
     if let Some(addr) = &args.stream_push {
         cfg.stream.push_to = addr.clone();
@@ -236,12 +244,15 @@ struct StreamCtx {
     push: Option<std::sync::Arc<streaming::MjpegPusher>>,
     enc_tx: streaming::LatestSender<(Vec<u8>, u32, u32)>,
     frame_div: u32,
+    /// Идёт запись стрима в файл (--record): энкодер работает и без зрителей.
+    recording: bool,
 }
 
 impl StreamCtx {
-    /// Кодировать кадр имеет смысл, только если есть хоть один зритель.
+    /// Кодировать кадр имеет смысл при зрителе или записи.
     fn wanted(&self) -> bool {
-        self.server.as_ref().is_some_and(|s| s.clients() > 0)
+        self.recording
+            || self.server.as_ref().is_some_and(|s| s.clients() > 0)
             || self.push.as_ref().is_some_and(|p| p.connected())
     }
 }
@@ -325,13 +336,31 @@ impl Runner {
             let quality = cfg.stream.quality;
             let srv = server.clone();
             let psh = push.clone();
+            let mut rec_file = if cfg.stream.record.is_empty() {
+                None
+            } else {
+                match std::fs::File::create(&cfg.stream.record) {
+                    Ok(f) => {
+                        tracing::info!(path = %cfg.stream.record, "запись стрима в файл");
+                        Some(f)
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "файл записи недоступен");
+                        None
+                    }
+                }
+            };
             // Кодирование — вне бюджетного потока кадра (§8 HARDWARE_TEST_RESULTS).
+            let recording = rec_file.is_some();
             let _enc = std::thread::Builder::new()
                 .name("mjpeg-encoder".into())
                 .spawn(move || {
                     while let Some((rgb, w, h)) = enc_rx.recv() {
                         match encode_jpeg_bytes(&rgb, w, h, quality) {
                             Ok(j) => {
+                                if let Some(f) = rec_file.as_mut() {
+                                    let _ = f.write_all(&j); // M-JPEG: кадры подряд
+                                }
                                 if let Some(s) = &srv {
                                     if s.clients() > 0 {
                                         s.push_jpeg(j.clone());
@@ -346,7 +375,7 @@ impl Runner {
                     }
                 })
                 .context("spawn mjpeg-encoder")?;
-            Some(StreamCtx { server, push, enc_tx, frame_div: cfg.stream.frame_div })
+            Some(StreamCtx { server, push, enc_tx, frame_div: cfg.stream.frame_div, recording })
         } else {
             None
         };
@@ -546,6 +575,7 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
         track_ms: &mut f32,
         det_ms: &mut Option<f32>,
     ) -> Result<bool> {
+        let mut last_det_conf = 0.0f32;
         // Демо-режим: синтетическая детекция в центре кадра — проверка
         // трекинга/гибрида на реальных кадрах (модель bkb видит только свой
         // целевой класс, которого в лабораторной сцене нет).
@@ -590,6 +620,7 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
                 match resp {
                     Ok(r) => {
                         *det_ms = Some(r.infer_ms);
+                        last_det_conf = r.detections.iter().map(|d| d.confidence).fold(0.0f32, f32::max);
                         stats.detect_us_total += (r.infer_ms * 1000.0) as u128;
                         if !r.detections.is_empty() {
                             stats.detections_hits += 1;
@@ -641,6 +672,31 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
             color,
             1,
         );
+        // Таймстемп локального времени и уверенность последней детекции —
+        // для покадрового сопоставления с эталонным видео (фаза A).
+        let now = chrono::Local::now();
+        osd::draw_text(
+            &mut rgb,
+            w,
+            h,
+            &now.format("%H:%M:%S").to_string(),
+            w as i32 - 62,
+            8,
+            osd::Rgb::Yellow,
+            1,
+        );
+        if last_det_conf > 0.0 {
+            osd::draw_text(
+                &mut rgb,
+                w,
+                h,
+                &format!("D-{last_det_conf:.2}"),
+                8,
+                36,
+                osd::Rgb::Cyan,
+                1,
+            );
+        }
         if seq % cfg.output.snapshot_every.max(1) as u64 == 0 {
             let path = format!("{}/frame_{seq:06}.jpg", cfg.output.dir);
             if let Err(e) = save_jpeg(&rgb, w, h, &path) {

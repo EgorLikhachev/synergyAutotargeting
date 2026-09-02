@@ -1,0 +1,18 @@
+[Unit]
+Description=synergy autotargeting (гибрид C: детекция NPU + трекинг + наведение)
+After=network.target
+
+[Service]
+Type=simple
+User=radxa
+WorkingDirectory=/home/radxa/synergy
+ExecStart=/home/radxa/synergy/target/release/synergy --config /home/radxa/synergy/config.toml
+Restart=on-failure
+RestartSec=3
+Environment=RUST_LOG=info
+# Приоритет реального времени не даём (NPU-драйвер сам по себе тяжёлый),
+# но повышаем приоритет планировщика чуть выше дефолта.
+Nice=-5
+
+[Install]
+WantedBy=multi-user.target

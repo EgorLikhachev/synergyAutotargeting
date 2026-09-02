@@ -68,6 +68,14 @@ cp config.example.toml config.toml   # поправьте /dev/videoX
 #   ssh -N -L 8080:127.0.0.1:8080 radxa@192.168.0.224  # без -f на Windows!
 #   → браузер http://127.0.0.1:8080/
 
+# Полный стек 60 FPS (трекер на NPU) + запись стрима для разбора:
+#   [camera] fps = 60; [tracker] backend = "rknn"; [commander] enabled = true
+./target/release/synergy --duration 60 --record /tmp/run.mjpg
+python3 tools/telemetry_report.py data/telemetry.jsonl   # сводка прогона
+
+# Автозапуск как сервис (фаза E): tools/synergy.service
+sudo cp tools/synergy.service /etc/systemd/system/ && sudo systemctl enable --now synergy
+
 # Локально без железа (синтетический источник, трекер на tract):
 cargo run --release -- --synthetic --duration 10
 ```

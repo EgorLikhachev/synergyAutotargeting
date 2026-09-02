@@ -150,6 +150,8 @@ pub struct StreamConfig {
     pub frame_div: u32,
     /// Качество JPEG (как у снапшотов).
     pub quality: u8,
+    /// Запись стрима в файл (M-JPEG, конкатенация кадров); пусто — выкл.
+    pub record: String,
 }
 
 impl Default for StreamConfig {
@@ -160,6 +162,7 @@ impl Default for StreamConfig {
             push_to: String::new(),
             frame_div: 2,
             quality: 80,
+            record: String::new(),
         }
     }
 }
