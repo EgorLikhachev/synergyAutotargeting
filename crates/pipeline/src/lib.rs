@@ -35,6 +35,9 @@ pub struct HybridConfig {
     pub lost_patience: u32,
     /// Минимальная уверенность детекции для захвата цели.
     pub min_detect_conf: f32,
+    /// Цифровая стабилизация (GMC): компенсация глобального сдвига кадра
+    /// перед трекингом — для жёсткого монтажа камеры без виброразвязки.
+    pub gmc: bool,
     /// Приоритетные классы (индексы): из детекций предпочитаем их.
     pub priority_classes: Vec<u32>,
     /// Инициализирован ли стабилизатор бокса.
@@ -51,6 +54,7 @@ impl Default for HybridConfig {
             min_detect_conf: 0.45,
             priority_classes: Vec::new(),
             use_stabilizer: true,
+            gmc: false,
         }
     }
 }
@@ -72,6 +76,7 @@ pub struct TargetState {
 pub struct HybridTracker {
     tracker: NanoTracker,
     stabilizer: Stabilizer,
+    gmc: Option<nano_track::gmc::GmcEstimator>,
     config: HybridConfig,
     frames_since_detect: u32,
     low_score_streak: u32,
@@ -88,8 +93,12 @@ fn should_detect(frame_idx: u64, every_n: u32, lost: bool) -> bool {
 
 impl HybridTracker {
     pub fn new(tracker: NanoTracker, config: HybridConfig) -> Self {
+        let gmc = config
+            .gmc
+            .then(|| nano_track::gmc::GmcEstimator::new(640, 480));
         Self {
             tracker,
+            gmc,
             stabilizer: Stabilizer::new(),
             config,
             frames_since_detect: 0,
@@ -187,6 +196,14 @@ impl HybridTracker {
             return self.state(Mode::Lost);
         }
 
+        // GMC: сдвигаем позицию цели на оценку глобального движения кадра
+        // (вибрация/поворот платформы) — трекер ищет в стабилизированной точке.
+        if let Some(g) = self.gmc.as_mut() {
+            let (dx, dy) = g.estimate(frame);
+            if dx != 0.0 || dy != 0.0 {
+                self.tracker.shift_position(dx, dy);
+            }
+        }
         let bbox = match self.tracker.update(frame) {
             Ok(b) => b,
             Err(e) => {

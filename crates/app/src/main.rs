@@ -73,6 +73,9 @@ struct Args {
     /// близость выходов на одинаковых кропах, включая проверку layout.
     #[arg(long)]
     diag_nets: bool,
+    /// Тряска камеры в синтетике, px (стенд GMC-стабилизации).
+    #[arg(long, default_value_t = 0.0)]
+    shake: f32,
     /// Записать стрим OSD в M-JPEG файл (путь; расширение .mjpg).
     #[arg(long, value_name = "PATH")]
     record: Option<String>,
@@ -106,6 +109,9 @@ fn main() -> Result<()> {
     if let Some(r) = &args.record {
         cfg.stream.record = r.clone();
         cfg.stream.enabled = true; // запись идёт через стрим-энкодер
+    }
+    if args.shake > 0.0 {
+        cfg.synthetic.shake_px = args.shake;
     }
     if let Some(addr) = &args.stream_push {
         cfg.stream.push_to = addr.clone();
@@ -313,6 +319,7 @@ impl Runner {
             min_detect_conf: cfg.pipeline.min_detect_conf,
             priority_classes: cfg.pipeline.priority_classes.clone(),
             use_stabilizer: cfg.pipeline.use_stabilizer,
+            gmc: cfg.pipeline.gmc,
         };
         let mut hybrid = HybridTracker::new(nano, hybrid_cfg);
 
@@ -568,6 +575,7 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
         cfg: &AppConfig,
         hybrid: &mut HybridTracker,
         stream: Option<&StreamCtx>,
+        #[allow(unused_mut)] // mut нужен linux-телу (as_deref_mut)
         mut commander: Option<&mut CommanderCtx>,
         det_req_tx: &std_mpsc::SyncSender<(Vec<u8>, u32, u32, u64)>,
         det_resp_rx: &std_mpsc::Receiver<Result<DetectResult, String>>,
@@ -813,6 +821,7 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
         #[allow(unused_variables)]
         stream: Option<&StreamCtx>,
         #[allow(unused_variables)]
+        #[allow(unused_mut)] // mut нужен linux-телу (as_deref_mut)
         mut commander: Option<&mut CommanderCtx>,
         #[allow(unused_variables)]
         det_req_tx: &std_mpsc::SyncSender<(Vec<u8>, u32, u32, u64)>,
@@ -970,6 +979,7 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
         cfg: &AppConfig,
         hybrid: &mut HybridTracker,
         stream: Option<&StreamCtx>,
+        #[allow(unused_mut)] // mut нужен linux-телу (as_deref_mut)
         mut commander: Option<&mut CommanderCtx>,
         det_req_tx: &std_mpsc::SyncSender<(Vec<u8>, u32, u32, u64)>,
         det_resp_rx: &std_mpsc::Receiver<Result<DetectResult, String>>,
@@ -995,11 +1005,11 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
                 }
             }
             let t = t0.elapsed().as_secs_f32();
-            let frame = synthetic::synth_frame(w, h, t);
+            let frame = synthetic::synth_frame(w, h, t, cfg.synthetic.shake_px);
             // «Детекция»: раз в N кадров — точный бокс (с шумом как у реальной сети).
             if hybrid.wants_detection(seq) && !hybrid.detect_inflight {
                 stats.detections_run += 1;
-                let bbox = synthetic::target_bbox(w, h, t);
+                let bbox = synthetic::target_bbox(w, h, t, cfg.synthetic.shake_px);
                 let dets = vec![Detection {
                     bbox: noisy(bbox, 2.0),
                     class_id: 0,
@@ -1277,9 +1287,9 @@ fn diag_nets() -> Result<()> {
     };
 
     for t in [0.0f32, 0.7, 1.9, 3.3] {
-        let frame = synthetic::synth_frame(640, 480, t);
+        let frame = synthetic::synth_frame(640, 480, t, 0.0);
         let img = Img::new(frame.data, 640, 480);
-        let (cx, cy) = synthetic::target_position(640, 480, t);
+        let (cx, cy) = synthetic::target_position(640, 480, t, 0.0);
         let crop127 = get_subwindow(&img, cx, cy, 180, 127);
         let crop255 = get_subwindow(&img, cx, cy, 360, 255);
 

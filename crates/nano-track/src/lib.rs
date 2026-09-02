@@ -11,6 +11,7 @@
 //! origin — OpenCV Zoo). template 127×127, search 255×255, scoreSize 16.
 
 pub mod backend_tract;
+pub mod gmc;
 #[cfg(feature = "npu")]
 pub mod backend_rknn;
 pub mod imgops;
@@ -282,6 +283,15 @@ impl NanoTracker {
     /// Score последнего update (качество сопровождения).
     pub fn tracking_score(&self) -> f32 {
         self.tracking_score
+    }
+
+    /// Сдвинуть позицию цели (GMC-компенсация глобального движения кадра).
+    pub fn shift_position(&mut self, dx: f32, dy: f32) {
+        self.target_pos[0] += dx;
+        self.target_pos[1] += dy;
+        let (w, h) = (self.img_size.0 as f32, self.img_size.1 as f32);
+        self.target_pos[0] = self.target_pos[0].clamp(0.0, w);
+        self.target_pos[1] = self.target_pos[1].clamp(0.0, h);
     }
 
     /// Инициализирован ли трекер.

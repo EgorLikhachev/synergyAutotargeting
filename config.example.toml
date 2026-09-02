@@ -36,7 +36,7 @@ lost_patience = 3          # кадров с низким score до форс-д
 min_detect_conf = 0.45
 priority_classes = []      # индексы приоритетных классов детектора
 use_stabilizer = true
-
+gmc = false                # цифровая стабилизация (жёсткий монтаж камеры)
 [output]
 dir = "data"
 snapshot_every = 30        # OSD-снапшот каждые N кадров
@@ -72,3 +72,6 @@ lead_s = 0.0               # упреждение наведения, с (0 — 
 lead_alpha = 0.25          # сглаживание оценки скорости цели
 stick_rate_px_s = 600.0    # скорость платформы при полном стике (фидфорвард)
 simulate = false           # true — без UART (тесты контура)
+
+[synthetic]
+shake_px = 0.0             # тряска камеры в синтетике (стенд GMC, или --shake)

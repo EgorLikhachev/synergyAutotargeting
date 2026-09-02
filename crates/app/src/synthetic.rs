@@ -1,22 +1,41 @@
 //! Синтетический источник: тёмный фон + яркий квадрат, движущийся по Лиссажу.
-//! Для полной локальной отладки гибрида без камеры/NPU.
+//! Для полной локальной отладки гибрида без камеры/NPU. Опциональная
+//! «тряска камеры» (shake_px) — стенд проверки GMC-стабилизации.
 
 use common::BBox;
 
-pub fn target_position(w: u32, h: u32, t: f32) -> (f32, f32) {
-    let cx = w as f32 * 0.5 + (w as f32 * 0.35) * (0.35 * t).sin();
-    let cy = h as f32 * 0.5 + (h as f32 * 0.3) * (0.5 * t + 1.0).cos();
-    (cx, cy)
+/// Смещение камеры (вибрация): сумма двух несоизмеримых синусов —
+/// непериодический джиттер с амплитудой amp.
+pub fn shake_offset(t: f32, amp: f32) -> (f32, f32) {
+    if amp <= 0.0 {
+        return (0.0, 0.0);
+    }
+    // Частоты подобраны под межкадровый сдвиг ~amp при 18-30 FPS
+    // (реальная вибрация выше, но для алгоритма важен сдвиг за кадр).
+    let sx = amp * (2.0 * std::f32::consts::PI * 2.1 * t).sin()
+        + amp * 0.6 * (2.0 * std::f32::consts::PI * 1.3 * t + 0.7).sin();
+    let sy = amp * 0.8 * (2.0 * std::f32::consts::PI * 1.7 * t + 1.3).cos()
+        + amp * 0.5 * (2.0 * std::f32::consts::PI * 0.9 * t).cos();
+    (sx, sy)
 }
 
-pub fn target_bbox(w: u32, h: u32, t: f32) -> BBox {
-    let (cx, cy) = target_position(w, h, t);
+pub fn target_position(w: u32, h: u32, t: f32, shake_px: f32) -> (f32, f32) {
+    let (cx, cy) = (
+        w as f32 * 0.5 + (w as f32 * 0.35) * (0.35 * t).sin(),
+        h as f32 * 0.5 + (h as f32 * 0.3) * (0.5 * t + 1.0).cos(),
+    );
+    let (sx, sy) = shake_offset(t, shake_px);
+    (cx - sx, cy - sy) // камера трясётся → цель уезжает в кадре
+}
+
+pub fn target_bbox(w: u32, h: u32, t: f32, shake_px: f32) -> BBox {
+    let (cx, cy) = target_position(w, h, t, shake_px);
     // Размер «цели» слегка дышит.
     let s = 56.0 + 8.0 * (0.7 * t).sin();
     BBox::new(cx - s * 0.5, cy - s * 0.5, s, s)
 }
 
-pub fn synth_frame(w: u32, h: u32, t: f32) -> common::Frame {
+pub fn synth_frame(w: u32, h: u32, t: f32, shake_px: f32) -> common::Frame {
     let mut data = vec![24u8; (w * h * 3) as usize];
     // Лёгкий градиент фона, чтобы у трекера была текстура для ошибок.
     for y in 0..h {
@@ -27,7 +46,7 @@ pub fn synth_frame(w: u32, h: u32, t: f32) -> common::Frame {
         }
     }
     // Цель — белый квадрат с чёрной рамкой.
-    let bbox = target_bbox(w, h, t);
+    let bbox = target_bbox(w, h, t, shake_px);
     let (bx, by, bw, bh) = (
         bbox.x as i32,
         bbox.y as i32,

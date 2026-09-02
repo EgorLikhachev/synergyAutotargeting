@@ -13,6 +13,7 @@ pub struct AppConfig {
     pub output: OutputConfig,
     pub stream: StreamConfig,
     pub commander: CommanderConfig,
+    pub synthetic: SyntheticConfig,
 }
 
 impl Default for AppConfig {
@@ -25,6 +26,7 @@ impl Default for AppConfig {
             output: OutputConfig::default(),
             stream: StreamConfig::default(),
             commander: CommanderConfig::default(),
+            synthetic: SyntheticConfig::default(),
         }
     }
 }
@@ -101,6 +103,8 @@ pub struct PipelineConfig {
     pub min_detect_conf: f32,
     pub priority_classes: Vec<u32>,
     pub use_stabilizer: bool,
+    /// Цифровая стабилизация (GMC) — жёсткий монтаж камеры.
+    pub gmc: bool,
 }
 
 impl Default for PipelineConfig {
@@ -112,6 +116,7 @@ impl Default for PipelineConfig {
             min_detect_conf: 0.45,
             priority_classes: Vec::new(),
             use_stabilizer: true,
+            gmc: false,
         }
     }
 }
@@ -226,6 +231,20 @@ impl Default for CommanderConfig {
             lead_alpha: 0.25,
             stick_rate_px_s: 600.0,
         }
+    }
+}
+
+/// Синтетический источник (--synthetic).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct SyntheticConfig {
+    /// Амплитуда тряски камеры, px (стенд GMC-стабилизации).
+    pub shake_px: f32,
+}
+
+impl Default for SyntheticConfig {
+    fn default() -> Self {
+        Self { shake_px: 0.0 }
     }
 }
 
