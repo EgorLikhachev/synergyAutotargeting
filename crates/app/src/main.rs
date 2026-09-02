@@ -67,6 +67,10 @@ struct Args {
     /// 192.168.0.174:9000; приёмник — tools/viewer.py). Обходит quirk ядра.
     #[arg(long, value_name = "ADDR")]
     stream_push: Option<String>,
+    /// Диагностика нейро-бэкендов трекера (tract ↔ rknn): косинусная
+    /// близость выходов на одинаковых кропах, включая проверку layout.
+    #[arg(long)]
+    diag_nets: bool,
 }
 
 fn main() -> Result<()> {
@@ -79,6 +83,10 @@ fn main() -> Result<()> {
 
     let args = Args::parse();
     install_signal_handlers();
+    #[cfg(feature = "npu")]
+    if args.diag_nets {
+        return diag_nets();
+    }
     let mut cfg = AppConfig::load(&args.config)
         .with_context(|| format!("чтение {}", args.config))?;
     if let Some(d) = args.duration {
@@ -964,5 +972,114 @@ fn encode_jpeg_bytes(rgb: &[u8], w: u32, h: u32, quality: u8) -> Result<Vec<u8>>
 fn save_jpeg(rgb: &[u8], w: u32, h: u32, path: &str) -> Result<()> {
     let bytes = encode_jpeg_bytes(rgb, w, h, 80)?;
     std::fs::write(path, bytes)?;
+    Ok(())
+}
+
+/// Диагностика tract↔rknn (фаза C): одинаковые кропы, косинус выходов.
+/// Проверяет и перестановку layout (RKNN внутренне NHWC — плоский порядок
+/// выходов может отличаться от NCHW-порядка tract).
+#[cfg(feature = "npu")]
+fn diag_nets() -> Result<()> {
+    use nano_track::imgops::{get_subwindow, Img};
+    use nano_track::{backend_rknn::RknnNets, backend_tract::TractNets, TrackerNets};
+
+    let tract = TractNets::load(
+        "models/nanotrack_backbone_127.onnx",
+        "models/nanotrack_backbone_sim.onnx",
+        "models/nanotrack_head_sim.onnx",
+        false,
+    )?;
+    let rknn = RknnNets::load(
+        "models/nanotrack_backbone_127.rknn",
+        "models/nanotrack_backbone_255.rknn",
+        "models/nanotrack_head.rknn",
+        false,
+    )?;
+    let mut tract = tract;
+    let mut rknn = rknn;
+
+    let cos = |a: &[f32], b: &[f32]| -> f32 {
+        let d: f32 = a.iter().zip(b).map(|(x, y)| x * y).sum();
+        let na: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
+        let nb: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
+        d / (na * nb + 1e-9)
+    };
+    // NCHW-плоский [C,H,W] → NHWC-плоский [H,W,C].
+    let to_nhwc = |src: &[f32], c: usize, h: usize, w: usize| -> Vec<f32> {
+        let mut dst = vec![0f32; src.len()];
+        for y in 0..h {
+            for x in 0..w {
+                for ch in 0..c {
+                    dst[(y * w + x) * c + ch] = src[ch * h * w + y * w + x];
+                }
+            }
+        }
+        dst
+    };
+    // NHWC-плоский [H,W,C] → NCHW-плоский [C,H,W] (и наоборот — та же перестановка).
+    let permute = |src: &[f32], c: usize, h: usize, w: usize| -> Vec<f32> {
+        // src: NHWC (h*w*c), dst: NCHW
+        let mut dst = vec![0f32; src.len()];
+        for y in 0..h {
+            for x in 0..w {
+                for ch in 0..c {
+                    dst[ch * h * w + y * w + x] = src[(y * w + x) * c + ch];
+                }
+            }
+        }
+        dst
+    };
+
+    for t in [0.0f32, 0.7, 1.9, 3.3] {
+        let frame = synthetic::synth_frame(640, 480, t);
+        let img = Img::new(frame.data, 640, 480);
+        let (cx, cy) = synthetic::target_position(640, 480, t);
+        let crop127 = get_subwindow(&img, cx, cy, 180, 127);
+        let crop255 = get_subwindow(&img, cx, cy, 360, 255);
+
+        let zf_t = tract.run_backbone_z(&crop127)?;
+        let zf_r = rknn.run_backbone_z(&crop127)?;
+        let xf_t = tract.run_backbone_x(&crop255)?;
+        let xf_r = rknn.run_backbone_x(&crop255)?;
+
+        // zf: 48×8×8, xf: 48×16×16
+        let (cz, hz, wz) = (48usize, 8, 8);
+        let (cx_, hx, wx) = (48usize, 16, 16);
+        println!("t={t}:");
+        println!(
+            "  zf: cos(raw)={:.4} cos(perm)={:.4} | диапазон tract [{:.2},{:.2}] rknn [{:.2},{:.2}]",
+            cos(&zf_t, &zf_r),
+            cos(&zf_t, &permute(&zf_r, cz, hz, wz)),
+            zf_t.iter().cloned().fold(f32::MAX, f32::min),
+            zf_t.iter().cloned().fold(f32::MIN, f32::max),
+            zf_r.iter().cloned().fold(f32::MAX, f32::min),
+            zf_r.iter().cloned().fold(f32::MIN, f32::max),
+        );
+        println!(
+            "  xf: cos(raw)={:.4} cos(perm)={:.4}",
+            cos(&xf_t, &xf_r),
+            cos(&xf_t, &permute(&xf_r, cx_, hx, wx)),
+        );
+
+        // Голова на ОДИНАКОВЫХ входах (tract-эталон) — изолируем голову.
+        let (cls_t, bb_t) = tract.run_head(&zf_t, &xf_t)?;
+        let (cls_r, bb_r) = rknn.run_head(&zf_t, &xf_t)?;
+        println!(
+            "  head(nchw): cls cos={:.4} bbox cos={:.4}",
+            cos(&cls_t, &cls_r),
+            cos(&bb_t, &bb_r),
+        );
+        // Вариант: входы головы в NHWC-плоском порядке (гипотеза о драйвере).
+        let zf_nhwc = to_nhwc(&zf_t, 48, 8, 8);
+        let xf_nhwc = to_nhwc(&xf_t, 48, 16, 16);
+        let outs = rknn
+            .head_probe(&zf_nhwc, &xf_nhwc)
+            .context("head probe")?;
+        println!(
+            "  head(nhwc): cls cos={:.4} bbox cos={:.4}",
+            cos(&cls_t, &outs.0),
+            cos(&bb_t, &outs.1),
+        );
+    }
     Ok(())
 }

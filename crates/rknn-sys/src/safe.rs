@@ -298,6 +298,11 @@ impl RknnModel {
                     f.len() * 4,
                     RKNN_TENSOR_FLOAT32,
                 ),
+                TensorData::Float32Nhwc(f) => (
+                    f.as_ptr() as *mut c_void,
+                    f.len() * 4,
+                    RKNN_TENSOR_FLOAT32,
+                ),
             };
             if attr.type_ == RKNN_TENSOR_FLOAT16 {
                 // для float-входа нужны байты f32
@@ -310,7 +315,12 @@ impl RknnModel {
             } else {
                 ty
             };
-            arr.push(rknn_input::new(idx, buf, len as u32, type_, attr.fmt));
+            // float-входы драйвер 2.3.0 местами ждёт в NHWC независимо от attr
+            let fmt = match data {
+                TensorData::Float32Nhwc(_) => RKNN_TENSOR_NHWC,
+                _ => attr.fmt,
+            };
+            arr.push(rknn_input::new(idx, buf, len as u32, type_, fmt));
         }
 
         let ret = unsafe { rknn_inputs_set(self.ctx, arr.len() as u32, arr.as_mut_ptr()) };
@@ -353,6 +363,8 @@ pub enum TensorData<'a> {
     Uint8Hwc(&'a [u8]),
     /// FLOAT32 в layout входа (NCHW как в ONNX) — для fp16-моделей.
     Float32(&'a [f32]),
+    /// FLOAT32, плоский NHWC (некоторые графы драйвера ждут только так).
+    Float32Nhwc(&'a [f32]),
 }
 
 /// C-строка имени атрибута.

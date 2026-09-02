@@ -19,7 +19,7 @@ pub mod ffi;
 pub mod safe;
 
 #[cfg(feature = "npu")]
-pub use safe::{RknnModel, RknnError};
+pub use safe::{RknnError, RknnModel, TensorData};
 
 /// Константы, общие для стаба и реального бэкенда.
 pub mod consts {

@@ -133,6 +133,45 @@ def main():
 
     from rknn.api import RKNN
 
+    def build_head(onnx_file, dataset, ort_h, pair):
+        """int8-голова (mmse+channel) с проверкой симулятором."""
+        from rknn.api import RKNN
+        rk = RKNN(verbose=False)
+        import onnx as _onnx
+        m = _onnx.load(onnx_file)
+        chans = []
+        for inp in m.graph.input:
+            dims = [d.dim_value for d in inp.type.tensor_type.shape.dim]
+            chans.append(int(dims[1]) if len(dims) == 4 else 1)
+        means = [[0] * c for c in chans]
+        stds = [[1] * c for c in chans]
+        rk.config(
+            mean_values=means,
+            std_values=stds,
+            target_platform="rk3588",
+            optimization_level=1,
+            quantized_algorithm="mmse",
+            quantized_method="channel",
+        )
+        if rk.load_onnx(model=onnx_file) != 0:
+            sys.exit("head: load_onnx ошибка")
+        if rk.build(do_quantization=True, dataset=dataset) != 0:
+            sys.exit("head: build ошибка")
+        out = os.path.join(MODELS, "nanotrack_head.rknn")
+        if rk.export_rknn(out) != 0:
+            sys.exit("head: export ошибка")
+        print(f"OK → {out} ({os.path.getsize(out)} байт, int8 mmse)")
+        if rk.init_runtime(target=None) == 0:
+            zf, xf = (np.load(p).astype(np.float32) for p in pair)
+            ins = ort_h.get_inputs()
+            ref = ort_h.run(None, {ins[0].name: zf, ins[1].name: xf})
+            got = rk.inference(inputs=[zf, xf], data_format="nchw")
+            for i, (r, g) in enumerate(zip(ref, got)):
+                a, b = r.flatten(), np.asarray(g).flatten()
+                cos = float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b) + 1e-9))
+                print(f"  выход {i}: cosine={cos:.5f} max|Δ|={np.abs(a - b).max():.4f}")
+        rk.release()
+
     def build(name, onnx_file, dataset, quantize, check_input=None, algo=None):
         print(f"\n=== {name}: {'int8' if quantize else 'fp16'} ===")
         rk = RKNN(verbose=False)
@@ -197,11 +236,15 @@ def main():
         (x_list[0], ort_x, in_x),
         "mmse",
     )
-    build(
-        "nanotrack_head.rknn",
+    # Голова: int8. fp16-вариант на librknnrt 2.3.0 исполняется на устройстве
+    # с потерей точности (симулятор 1.000, устройство 0.90) — а int8-бэкбеги
+    # на устройстве верны. Пробуем int8 с mmse+per-channel.
+    ort_h = ort.InferenceSession(os.path.join(MODELS, "nanotrack_head_sim.onnx"))
+    build_head(
         os.path.join(MODELS, "nanotrack_head_sim.onnx"),
         os.path.join(WORK, "ds_head.txt"),
-        False,  # fp16: feature-входы чувствительны к int8
+        ort_h,
+        pairs[0],
     )
     print("\nготово: 3 .rknn в models/")
 

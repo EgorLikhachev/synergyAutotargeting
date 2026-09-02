@@ -71,6 +71,26 @@ impl RknnNets {
         })
     }
 
+    /// Диагностика: прогон головы с NHWC-плоскими float-входами.
+    #[allow(dead_code)]
+    pub fn head_probe(
+        &mut self,
+        zf_nhwc: &[f32],
+        xf_nhwc: &[f32],
+    ) -> NanoResult<(Vec<f32>, Vec<f32>)> {
+        let outs = self
+            .head
+            .infer_inputs(&[
+                (self.head_zf_input, TensorData::Float32Nhwc(zf_nhwc)),
+                (self.head_xf_input, TensorData::Float32Nhwc(xf_nhwc)),
+            ])
+            .map_err(|e| NanoError::Inference(anyhow::anyhow!("head probe: {e}")))?;
+        Ok((
+            outs.get(self.head_cls_output).cloned().unwrap_or_default(),
+            outs.get(self.head_bbox_output).cloned().unwrap_or_default(),
+        ))
+    }
+
     fn run_backbone(&mut self, which: bool, crop: &Img) -> NanoResult<Vec<f32>> {
         let data = if self.swap_rb {
             // Модели сконвертированы под RGB; при необходимости меняем каналы.
@@ -92,6 +112,19 @@ impl RknnNets {
     }
 }
 
+/// NCHW-плоский [C,H,W] → NHWC-плоский [H,W,C].
+fn nchw_to_nhwc(src: &[f32], c: usize, h: usize, w: usize) -> Vec<f32> {
+    let mut dst = vec![0f32; src.len()];
+    for y in 0..h {
+        for x in 0..w {
+            for ch in 0..c {
+                dst[(y * w + x) * c + ch] = src[ch * h * w + y * w + x];
+            }
+        }
+    }
+    dst
+}
+
 impl TrackerNets for RknnNets {
     fn run_backbone_z(&mut self, crop: &Img) -> NanoResult<Vec<f32>> {
         self.run_backbone(false, crop)
@@ -102,11 +135,17 @@ impl TrackerNets for RknnNets {
     }
 
     fn run_head(&mut self, zf: &[f32], xf: &[f32]) -> NanoResult<(Vec<f32>, Vec<f32>)> {
+        // QUIRK librknnrt 2.3.0: float-входы мульти-входовых графов драйвер
+        // ждёт в NHWC-плоском порядке даже при attr.fmt=NCHW (симулятор x86
+        // при этом честен к NCHW). Диагностика 2026-09-02: NCHW cls cos 0.89,
+        // NHWC — 0.993/0.9996. Переставляем [C,H,W] → [H,W,C].
+        let zf_nhwc = nchw_to_nhwc(zf, 48, 8, 8);
+        let xf_nhwc = nchw_to_nhwc(xf, 48, 16, 16);
         let outs = self
             .head
             .infer_inputs(&[
-                (self.head_zf_input, TensorData::Float32(zf)),
-                (self.head_xf_input, TensorData::Float32(xf)),
+                (self.head_zf_input, TensorData::Float32Nhwc(&zf_nhwc)),
+                (self.head_xf_input, TensorData::Float32Nhwc(&xf_nhwc)),
             ])
             .map_err(|e| NanoError::Inference(anyhow::anyhow!("head RKNN: {e}")))?;
         let cls = outs
