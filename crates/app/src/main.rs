@@ -543,17 +543,81 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
             use capture::traits::VideoSource;
 
             let vcfg = capture::VideoSourceConfig::from_common(&cfg.camera);
-            let mut src = capture::V4l2DirectSource::new(
-                vcfg.device.clone(),
-                vcfg.width,
-                vcfg.height,
-                vcfg.fps,
-            )
-            .with_format(vcfg.format);
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_time()
                 .build()?;
-            let mut rx = rt.block_on(src.start())?;
+
+            // Быстрый re-open камеры (pkill и мгновенный перезапуск) иногда
+            // оставляет UVC в сбойном режиме: кадр правильного размера, но
+            // содержимое — реплика 3×3 (замечено на железе 2026-09-02).
+            // Валидируем первый кадр и пересоздаём источник с паузой.
+            let (mut rx, mut src) = 'valid: {
+                let mut fail: Option<(&str, f32)> = None;
+                for attempt in 1..=3u32 {
+                    let mut src = capture::V4l2DirectSource::new(
+                        vcfg.device.clone(),
+                        vcfg.width,
+                        vcfg.height,
+                        vcfg.fps,
+                    )
+                    .with_format(vcfg.format);
+                    let mut rx = match rt.block_on(src.start()) {
+                        Ok(rx) => rx,
+                        Err(e) => return Err(e).context("запуск захвата"),
+                    };
+                    let first = rt.block_on(async {
+                        tokio::time::timeout(Duration::from_secs(3), rx.recv()).await
+                    });
+                    let Ok(Some(frame)) = first else {
+                        tracing::warn!(attempt, "первый кадр не пришёл за 3 с");
+                        fail = Some(("нет кадра", 0.0));
+                        rt.block_on(src.stop()).ok();
+                        std::thread::sleep(Duration::from_secs(3));
+                        continue;
+                    };
+                    if frame.metadata.format == PixelFormat::Mjpeg {
+                        if let Ok(rgbf) = decode_mjpeg_to_rgb(&frame) {
+                            let tiled = frame_tiled_replication(
+                                &rgbf.data,
+                                rgbf.metadata.width,
+                                rgbf.metadata.height,
+                            );
+                            tracing::info!(
+                                attempt,
+                                tiled = tiled.0,
+                                mean_diff = tiled.1,
+                                "первый кадр проверен"
+                            );
+                            if tiled.0 {
+                                tracing::warn!(
+                                    attempt,
+                                    mean_diff = tiled.1,
+                                    "камера в сбойном режиме (кадр 3×3), пересоздаю источник"
+                                );
+                                fail = Some(("tiled", tiled.1));
+                                rt.block_on(src.stop()).ok();
+                                std::thread::sleep(Duration::from_secs(3));
+                                continue;
+                            }
+                        }
+                    }
+                    break 'valid (rx, src);
+                }
+                // три неудачи — работаем с тем, что есть (пустая стена
+                // тоже даёт похожие тайлы), но громко предупреждаем.
+                tracing::error!(fail = ?fail, "валидация первого кадра не прошла 3 раза, продолжаю");
+                let mut src = capture::V4l2DirectSource::new(
+                    vcfg.device.clone(),
+                    vcfg.width,
+                    vcfg.height,
+                    vcfg.fps,
+                )
+                .with_format(vcfg.format);
+                let rx = rt
+                    .block_on(src.start())
+                    .context("запуск захвата (после 3 попыток)")?;
+                (rx, src)
+            };
             tracing::info!(device = %vcfg.device, "захват с камеры запущен");
 
             let started = Instant::now();
@@ -702,6 +766,90 @@ fn noisy(mut b: common::BBox, amp: f32) -> common::BBox {
     b.x += (b.w * 0.01) * amp * (b.x % 7.0 - 3.0).sin();
     b.y += (b.h * 0.01) * amp * (b.y % 5.0 - 2.0).cos();
     b
+}
+
+/// Детектор сбойного режима камеры (быстрый re-open UVC): кадр правильного
+/// размера, но содержимое — реплика одной сцены 3×3. У живой сцены соседние
+/// девятые кадра различаются заметно сильнее, чем копии. Возврат: (tiled,
+/// средняя |разность|). Однородная сцена (стена) не детектируется намеренно.
+fn frame_tiled_replication(rgb: &[u8], w: u32, h: u32) -> (bool, f32) {
+    let (w, h) = (w as usize, h as usize);
+    if w < 24 || h < 24 || rgb.len() < w * h * 3 {
+        return (false, 0.0);
+    }
+    let (tw, th) = (w / 3, h / 3);
+    let step = (tw / 40).clamp(1, 8).max((th / 30).clamp(1, 8));
+    let mut acc = 0u64;
+    let mut diffs = 0u64;
+    let mut samples = 0u64;
+    let mut sum = 0u64;
+    let mut sum_sq = 0u64;
+    for y in (0..th).step_by(step) {
+        for x in (0..tw).step_by(step) {
+            let a = (y * w + x) * 3;
+            let right = (y * w + tw + x) * 3;
+            let below = ((y + th) * w + x) * 3;
+            let ra = rgb[a] as u32;
+            acc += (ra).abs_diff(rgb[right] as u32) as u64;
+            acc += (ra).abs_diff(rgb[below] as u32) as u64;
+            diffs += 2;
+            sum += ra as u64;
+            sum_sq += (ra * ra) as u64;
+            samples += 1;
+        }
+    }
+    let mean = sum as f64 / samples as f64;
+    let var = (sum_sq as f64 / samples as f64 - mean * mean).max(0.0);
+    if var.sqrt() < 12.0 {
+        return (false, 0.0); // однородная сцена — не различить
+    }
+    let mean_diff = acc as f32 / diffs as f32;
+    (mean_diff < 6.0, mean_diff)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::frame_tiled_replication;
+
+    #[test]
+    fn tiled_replication_detected() {
+        let (w, h) = (640u32, 480u32);
+        // Живая сцена в левом верхнем тайле, реплицированная 3×3.
+        let mut tile = vec![0u8; (w / 3 * h / 3 * 3) as usize];
+        for (i, p) in tile.iter_mut().enumerate() {
+            let (x, y) = (i / 3 % (w as usize / 3), i / 3 / (w as usize / 3));
+            *p = ((x * 7 + y * 13) % 251) as u8;
+        }
+        let mut rgb = vec![0u8; (w * h * 3) as usize];
+        for ty in 0..3 {
+            for tx in 0..3 {
+                for y in 0..h as usize / 3 {
+                    for x in 0..w as usize / 3 {
+                        let src = (y * (w as usize / 3) + x) * 3;
+                        let dst = ((ty * h as usize / 3 + y) * w as usize
+                            + tx * w as usize / 3
+                            + x)
+                            * 3;
+                        rgb[dst..dst + 3].copy_from_slice(&tile[src..src + 3]);
+                    }
+                }
+            }
+        }
+        let (tiled, d) = frame_tiled_replication(&rgb, w, h);
+        assert!(tiled, "реплика 3×3 не распознана, mean_diff={d}");
+        // Различающаяся сцена (градиент по всему кадру) — не «тайл».
+        let mut grad = vec![0u8; (w * h * 3) as usize];
+        for i in 0..(w * h) as usize {
+            grad[i * 3] = (i / (w as usize) % 256) as u8;
+            grad[i * 3 + 1] = (i % (w as usize) % 256) as u8;
+        }
+        let (tiled2, _) = frame_tiled_replication(&grad, w, h);
+        assert!(!tiled2, "градиент ошибочно признан репликой");
+        // Однородная стена — детектор сознательно молчит.
+        let wall = vec![128u8; (w * h * 3) as usize];
+        let (tiled3, _) = frame_tiled_replication(&wall, w, h);
+        assert!(!tiled3);
+    }
 }
 
 /// Мини-сериализатор (не тянем serde_json ради одной строки в кадр).
