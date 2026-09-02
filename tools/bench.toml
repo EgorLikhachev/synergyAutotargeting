@@ -1,0 +1,14 @@
+[camera]
+device = "/dev/video0"
+width = 640
+height = 480
+fps = 60
+format = "mjpeg"
+queue_depth = 4
+
+[tracker]
+backend = "rknn"
+
+[commander]
+enabled = true
+rate_hz = 30

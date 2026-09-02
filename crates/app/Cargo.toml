@@ -33,4 +33,4 @@ jpeg-encoder.workspace = true
 [features]
 default = []
 # Включает реальный NPU-путь (собирать на борту: cargo build --release --features npu)
-npu = ["rknn-sys/npu"]
+npu = ["rknn-sys/npu", "nano-track/npu"]

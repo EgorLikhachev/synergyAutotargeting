@@ -28,6 +28,8 @@ fn install_signal_handlers() {
 use anyhow::{bail, Context, Result};
 use clap::Parser;
 use common::Detection;
+#[cfg(target_os = "linux")]
+use common::{Frame, PixelFormat};
 use nano_track::imgops::Img;
 use pipeline::{HybridConfig, HybridTracker, Mode};
 use serde::Serialize;
@@ -802,15 +804,26 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
     #[allow(clippy::too_many_arguments)]
     fn run_camera(
         &self,
-        _cfg: &AppConfig,
-        _hybrid: &mut HybridTracker,
-        _stream: Option<&StreamCtx>,
-        _commander: Option<&mut CommanderCtx>,
-        _det_req_tx: &std_mpsc::SyncSender<(Vec<u8>, u32, u32, u64)>,
-        _det_resp_rx: &std_mpsc::Receiver<Result<DetectResult, String>>,
-        _stats: &mut RunStats,
-        _telemetry: &mut std::fs::File,
-        _deadline: Option<Instant>,
+        // Имена без подчёркивания: тело живёт в cfg(target_os="linux")
+        // (на Windows параметры формально не читаются — отсюда allow).
+        #[allow(unused_variables)]
+        cfg: &AppConfig,
+        #[allow(unused_variables)]
+        hybrid: &mut HybridTracker,
+        #[allow(unused_variables)]
+        stream: Option<&StreamCtx>,
+        #[allow(unused_variables)]
+        mut commander: Option<&mut CommanderCtx>,
+        #[allow(unused_variables)]
+        det_req_tx: &std_mpsc::SyncSender<(Vec<u8>, u32, u32, u64)>,
+        #[allow(unused_variables)]
+        det_resp_rx: &std_mpsc::Receiver<Result<DetectResult, String>>,
+        #[allow(unused_variables)]
+        stats: &mut RunStats,
+        #[allow(unused_variables)]
+        telemetry: &mut std::fs::File,
+        #[allow(unused_variables)]
+        deadline: Option<Instant>,
     ) -> Result<()> {
         #[cfg(target_os = "linux")]
         {
@@ -896,6 +909,8 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
             tracing::info!(device = %vcfg.device, "захват с камеры запущен");
 
             let started = Instant::now();
+            let mut det_log = open_detections_log(cfg);
+            let mut last_dets: Vec<Detection> = Vec::new();
             let (mut fps, mut track_ms, mut det_ms) = (0f32, 0f32, None);
             let mut fps_counter = FpsCounter::new();
             loop {
@@ -1157,7 +1172,7 @@ fn serde_json_line(line: &TelemetryLine) -> String {
         None => "null".into(),
     };
     format!(
-        "{{\"ts_ms\":{},\"frame_seq\":{},\"mode\":\"{}\",\"x\":{},\"y\":{},\"w\":{},\"h\":{},\"score\":{},\"track_ms\":{},\"det_ms\":{},\"fps\":{}}}",
+        "{{\"ts_ms\":{},\"frame_seq\":{},\"mode\":\"{}\",\"x\":{},\"y\":{},\"w\":{},\"h\":{},\"score\":{},\"track_ms\":{},\"det_ms\":{},\"fps\":{},\"e2e_ms\":{}}}",
         line.ts_ms,
         line.frame_seq,
         line.mode,
@@ -1168,7 +1183,8 @@ fn serde_json_line(line: &TelemetryLine) -> String {
         line.score,
         line.track_ms,
         optf(line.det_ms),
-        line.fps
+        line.fps,
+        line.e2e_ms
     )
 }
 
