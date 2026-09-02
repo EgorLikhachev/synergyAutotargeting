@@ -56,12 +56,17 @@ cp config.example.toml config.toml   # поправьте /dev/videoX
 # Цель в кадре отсутствует, но трекер нужно погонять на живом видео:
 ./target/release/synergy --duration 60 --demo-detect   # цель-фантом в центре
 
-# Живой стрим OSD (флаг или [stream].enabled в конфиге):
-./target/release/synergy --duration 0 --stream
-# на ПК (особенность ядра: входящие TCP к пользовательским портам при
-# работающем NPU не проходят — смотрим через туннель, ADR-009):
-ssh -N -L 8080:127.0.0.1:43117 radxa@192.168.0.224   # отдельное окно
-# затем браузер/VLC: http://127.0.0.1:8080/
+# Живой стрим OSD — push-режим (рекомендуется, туннель не нужен):
+#   1) на ПК:      python tools/viewer.py          # приёмник + браузер :9001
+#   2) на борту:   ./target/release/synergy --duration 0 --stream-push <ip-ПК>:9000
+#   3) браузер/VLC: http://127.0.0.1:9001/
+# (push обходит quirk vendor-ядра — входящие TCP к user-портам при активном
+# NPU не проходят, исходящие — всегда; ADR-009)
+#
+# Альтернатива со слушающим сервером (работает по localhost борта / туннелю):
+#   ./target/release/synergy --duration 0 --stream
+#   ssh -N -L 8080:127.0.0.1:8080 radxa@192.168.0.224  # без -f на Windows!
+#   → браузер http://127.0.0.1:8080/
 
 # Локально без железа (синтетический источник, трекер на tract):
 cargo run --release -- --synthetic --duration 10

@@ -8,7 +8,7 @@
 
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
@@ -75,6 +75,87 @@ impl<T> LatestReceiver<T> {
             slot = self.state.cv.wait(slot).unwrap();
         }
     }
+
+    /// Отправитель умер и новых кадров не будет.
+    pub fn is_closed(&self) -> bool {
+        self.state.inner.lock().unwrap().closed
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Push-режим: борт сам подключается к зрителю
+// ---------------------------------------------------------------------------
+
+/// Исходящее подключение к зрителю с автопереподключением (каждые 3 с).
+/// Мотивация: на vendor-ядре RK3588S при активном NPU не проходят новые
+/// входящие TCP к пользовательским листенерам, а исходящие — работают
+/// всегда (ADR-009). Зритель — tools/viewer.py или любой приёмник.
+pub struct MjpegPusher {
+    connected: Arc<AtomicBool>,
+    tx: LatestSender<Vec<u8>>,
+}
+
+impl MjpegPusher {
+    pub fn start(addr: &str) -> MjpegPusher {
+        let (tx, rx) = latest_channel::<Vec<u8>>();
+        let connected = Arc::new(AtomicBool::new(false));
+        let flag = connected.clone();
+        let addr = addr.to_string();
+        let _ = std::thread::Builder::new()
+            .name("mjpeg-push".into())
+            .spawn(move || {
+                eprintln!("[MJPEG-PUSH] запущен, цель {addr}");
+                loop {
+                    if let Ok(mut s) = TcpStream::connect(&addr) {
+                        let _ = s.set_nodelay(true);
+                        let head = b"HTTP/1.0 200 OK\r\n\
+                                     Content-Type: multipart/x-mixed-replace; boundary=frame\r\n\
+                                     Cache-Control: no-store\r\n\r\n";
+                        if s.write_all(head).is_ok() {
+                            flag.store(true, Ordering::Relaxed);
+                            eprintln!("[MJPEG-PUSH] подключён к {addr}");
+                            while let Some(jpeg) = rx.recv() {
+                                if write_frame(&mut s, &jpeg).is_err() {
+                                    break;
+                                }
+                            }
+                            flag.store(false, Ordering::Relaxed);
+                            eprintln!("[MJPEG-PUSH] соединение с {addr} потеряно");
+                        }
+                    }
+                    if rx.is_closed() {
+                        eprintln!("[MJPEG-PUSH] завершён");
+                        return;
+                    }
+                    std::thread::sleep(Duration::from_secs(3));
+                }
+            });
+        Self { connected, tx }
+    }
+
+    /// Есть ли живой зритель на другом конце (гейт для кодирования).
+    pub fn connected(&self) -> bool {
+        self.connected.load(Ordering::Relaxed)
+    }
+
+    /// Отправить кадр подключённому зрителю (если его нет — кадр теряется).
+    pub fn send(&self, jpeg: Vec<u8>) {
+        if self.connected() {
+            self.tx.send(jpeg);
+        }
+    }
+}
+
+/// Один multipart-кусок: граница, заголовки, JPEG, завершающий CRLF.
+fn write_frame(stream: &mut TcpStream, jpeg: &[u8]) -> std::io::Result<()> {
+    write!(
+        stream,
+        "--frame\r\nContent-Type: image/jpeg\r\nContent-Length: {}\r\n\r\n",
+        jpeg.len()
+    )?;
+    stream.write_all(jpeg)?;
+    stream.write_all(b"\r\n")?;
+    stream.flush()
 }
 
 // ---------------------------------------------------------------------------
@@ -229,12 +310,7 @@ align-items:center;justify-content:center}img{max-width:100%;max-height:100%}\
             }
         };
         let Some(jpeg) = jpeg else { continue };
-        let ok = write!(stream, "--frame\r\nContent-Type: image/jpeg\r\nContent-Length: {}\r\n\r\n", jpeg.len())
-            .and_then(|_| stream.write_all(&jpeg))
-            .and_then(|_| stream.write_all(b"\r\n"))
-            .and_then(|_| stream.flush())
-            .is_ok();
-        if ok {
+        if write_frame(&mut stream, &jpeg).is_ok() {
             hub.served_frames.fetch_add(1, Ordering::Relaxed);
         } else {
             eprintln!("[MJPEG] {peer}: обрыв на записи кадра");
@@ -257,6 +333,51 @@ mod tests {
         assert_eq!(rx.recv(), Some(2));
         drop(tx);
         assert_eq!(rx.recv(), None);
+    }
+
+    #[test]
+    fn pusher_connects_and_streams_multipart() {
+        use std::net::TcpListener;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let pusher = MjpegPusher::start(&format!("127.0.0.1:{port}"));
+        // Ждём исходящее подключение от pusher'а.
+        let (mut sock, _) = listener.accept().unwrap();
+        // Подключение могло случиться до head — читаем с таймаутом.
+        sock.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+        let mut all: Vec<u8> = Vec::new();
+        let mut chunk = [0u8; 8192];
+        // connected поднимается после записи head — ждём готовности.
+        for _ in 0..100 {
+            if pusher.connected() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(pusher.connected(), "pusher не поднял connected");
+        // LatestSlot затирает: отправляем кадр и ждём его доставки, потом следующий.
+        let mut read_until = |all: &mut Vec<u8>, needle: u8| -> bool {
+            for _ in 0..150 {
+                match sock.read(&mut chunk) {
+                    Ok(0) | Err(_) => return false,
+                    Ok(n) => all.extend_from_slice(&chunk[..n]),
+                }
+                if all.contains(&needle) {
+                    return true;
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            false
+        };
+        let mut all = Vec::new();
+        assert!(read_until(&mut all, b'H'), "head не получен"); // 'H' из HTTP/1.0
+        pusher.send(vec![0xA5; 64]);
+        assert!(read_until(&mut all, 0xA5), "кадр 1 не пришёл");
+        pusher.send(vec![0x5A; 64]);
+        assert!(read_until(&mut all, 0x5A), "кадр 2 не пришёл");
+        assert!(all.starts_with(b"HTTP/1.0 200 OK"));
+        // Drop pusher → канал закрыт → поток завершается, соединение рвётся.
+        drop(pusher);
     }
 
     #[test]

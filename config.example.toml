@@ -39,7 +39,10 @@ telemetry = true
 duration_secs = 0          # 0 = до Ctrl+C
 
 [stream]
-enabled = false            # или флаг --stream
-bind = "0.0.0.0:8080"      # смотреть: http://<ip-борты>:8080/ из браузера/VLC
+enabled = false            # слушающий MJPEG-сервер (или флаг --stream)
+bind = "0.0.0.0:8080"      # смотреть с борта/localhost
+push_to = ""               # push-режим: "192.168.0.174:9000" — борт сам
+                           # подключается к tools/viewer.py (рекомендуется:
+                           # исходящие TCP работают даже при quirk ядра)
 frame_div = 2              # отдавать каждый 2-й кадр (~15 FPS)
 quality = 80               # качество JPEG (как у снапшотов)

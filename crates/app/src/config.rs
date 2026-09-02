@@ -131,6 +131,9 @@ pub struct StreamConfig {
     pub enabled: bool,
     /// Адрес привязки ("0.0.0.0:8080" — слушать все интерфейсы).
     pub bind: String,
+    /// Push-режим: борт сам подключается к зрителю ("192.168.0.174:9000",
+    /// пусто — выключено). Работает всегда, см. ADR-009 (quirk ядра).
+    pub push_to: String,
     /// Отдавать каждый N-й кадр (2 ≈ 15 FPS при 30 камере).
     pub frame_div: u32,
     /// Качество JPEG (как у снапшотов).
@@ -142,6 +145,7 @@ impl Default for StreamConfig {
         Self {
             enabled: false,
             bind: "0.0.0.0:8080".into(),
+            push_to: String::new(),
             frame_div: 2,
             quality: 80,
         }

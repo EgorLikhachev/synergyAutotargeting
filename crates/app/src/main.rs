@@ -63,6 +63,10 @@ struct Args {
     /// Включить живой MJPEG-стрим OSD (http://<ip>:<port>/, см. [stream]).
     #[arg(long)]
     stream: bool,
+    /// Push-стрим: борт сам подключается к зрителю (ADDR:PORT, напр.
+    /// 192.168.0.174:9000; приёмник — tools/viewer.py). Обходит quirk ядра.
+    #[arg(long, value_name = "ADDR")]
+    stream_push: Option<String>,
 }
 
 fn main() -> Result<()> {
@@ -85,6 +89,10 @@ fn main() -> Result<()> {
     }
     if args.stream {
         cfg.stream.enabled = true;
+    }
+    if let Some(addr) = &args.stream_push {
+        cfg.stream.push_to = addr.clone();
+        cfg.stream.enabled = true; // push включает стрим-контекст целиком
     }
     std::fs::create_dir_all(&cfg.output.dir).ok();
 
@@ -131,11 +139,20 @@ struct Runner {
     demo_detect: bool,
 }
 
-/// Живой стрим OSD: сервер + канал к потоку-энкодеру JPEG.
+/// Живой стрим OSD: сервер + канал к потоку-энкодеру JPEG + push-выход.
 struct StreamCtx {
-    server: streaming::MjpegServer,
+    server: Option<streaming::MjpegServer>,
+    push: Option<std::sync::Arc<streaming::MjpegPusher>>,
     enc_tx: streaming::LatestSender<(Vec<u8>, u32, u32)>,
     frame_div: u32,
+}
+
+impl StreamCtx {
+    /// Кодировать кадр имеет смысл, только если есть хоть один зритель.
+    fn wanted(&self) -> bool {
+        self.server.as_ref().is_some_and(|s| s.clients() > 0)
+            || self.push.as_ref().is_some_and(|p| p.connected())
+    }
 }
 
 impl Runner {
@@ -175,30 +192,54 @@ impl Runner {
         };
         let mut hybrid = HybridTracker::new(nano, hybrid_cfg);
 
-        // === Стрим OSD (MJPEG-over-HTTP, ADR-009) ===
-        let stream_ctx = if cfg.stream.enabled {
-            let server = streaming::MjpegServer::start(&cfg.stream.bind)
-                .with_context(|| format!("bind {}", cfg.stream.bind))?;
-            tracing::info!(
-                port = server.port(),
-                "стрим MJPEG: http://<ip>:{}/ (браузер/VLC)", server.port()
-            );
+        // === Стрим OSD (MJPEG, ADR-009): слушающий сервер и/или push ===
+        let stream_ctx = if cfg.stream.enabled
+            || !cfg.stream.push_to.is_empty()
+        {
+            let server = if cfg.stream.enabled {
+                let s = streaming::MjpegServer::start(&cfg.stream.bind)
+                    .with_context(|| format!("bind {}", cfg.stream.bind))?;
+                tracing::info!(
+                    port = s.port(),
+                    "стрим MJPEG (listen): http://<ip>:{}/ (браузер/VLC)", s.port()
+                );
+                Some(s)
+            } else {
+                None
+            };
+            let push = if !cfg.stream.push_to.is_empty() {
+                let p = std::sync::Arc::new(streaming::MjpegPusher::start(&cfg.stream.push_to));
+                tracing::info!(addr = %cfg.stream.push_to, "стрим MJPEG (push): подключаюсь к зрителю");
+                Some(p)
+            } else {
+                None
+            };
             let (enc_tx, enc_rx) = streaming::latest_channel::<(Vec<u8>, u32, u32)>();
             let quality = cfg.stream.quality;
             let srv = server.clone();
-            // Кодирование — вне бюджетного потока кадра (§4 HARDWARE_TEST_RESULTS).
+            let psh = push.clone();
+            // Кодирование — вне бюджетного потока кадра (§8 HARDWARE_TEST_RESULTS).
             let _enc = std::thread::Builder::new()
                 .name("mjpeg-encoder".into())
                 .spawn(move || {
                     while let Some((rgb, w, h)) = enc_rx.recv() {
                         match encode_jpeg_bytes(&rgb, w, h, quality) {
-                            Ok(j) => srv.push_jpeg(j),
+                            Ok(j) => {
+                                if let Some(s) = &srv {
+                                    if s.clients() > 0 {
+                                        s.push_jpeg(j.clone());
+                                    }
+                                }
+                                if let Some(p) = &psh {
+                                    p.send(j);
+                                }
+                            }
                             Err(e) => tracing::warn!(error = %e, "кадр стрима не закодирован"),
                         }
                     }
                 })
                 .context("spawn mjpeg-encoder")?;
-            Some(StreamCtx { server, enc_tx, frame_div: cfg.stream.frame_div })
+            Some(StreamCtx { server, push, enc_tx, frame_div: cfg.stream.frame_div })
         } else {
             None
         };
@@ -266,10 +307,9 @@ impl Runner {
             let _ = h.join();
         }
         if let Some(st) = &stream_ctx {
-            println!(
-                "стрим: {} кадров отдано зрителям",
-                st.server.served_frames()
-            );
+            let served = st.server.as_ref().map(|s| s.served_frames()).unwrap_or(0);
+            let pushed = st.push.as_ref().map(|p| p.connected()).unwrap_or(false);
+            println!("стрим: {served} кадров отдано слушателям (push: {pushed})");
         }
         result
     }
@@ -490,9 +530,9 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
         }
 
         // 4б) Живой стрим: кадр уже с OSD — отдаём энкодер-потоку, только
-        // если есть зрители (иначе JPEG-кодирование не тратит CPU вовсе).
+        // если есть зритель (listen или push), иначе JPEG не кодируем вовсе.
         if let Some(st) = stream {
-            if st.server.clients() > 0 && seq % st.frame_div.max(1) as u64 == 0 {
+            if st.wanted() && seq % st.frame_div.max(1) as u64 == 0 {
                 st.enc_tx.send((rgb.clone(), w, h));
             }
         }
