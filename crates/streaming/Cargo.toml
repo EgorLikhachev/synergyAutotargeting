@@ -1,0 +1,7 @@
+[package]
+name = "streaming"
+version = "0.1.0"
+edition = "2021"
+
+# Ноль зависимостей: только std — ADR-009 (живое наблюдение без GStreamer).
+[dependencies]

@@ -37,3 +37,9 @@ dir = "data"
 snapshot_every = 30        # OSD-снапшот каждые N кадров
 telemetry = true
 duration_secs = 0          # 0 = до Ctrl+C
+
+[stream]
+enabled = false            # или флаг --stream
+bind = "0.0.0.0:8080"      # смотреть: http://<ip-борты>:8080/ из браузера/VLC
+frame_div = 2              # отдавать каждый 2-й кадр (~15 FPS)
+quality = 80               # качество JPEG (как у снапшотов)

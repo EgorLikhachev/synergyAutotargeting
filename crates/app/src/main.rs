@@ -56,10 +56,13 @@ struct Args {
     /// Каталог вывода
     #[arg(short, long, default_value = None)]
     output: Option<String>,
-    /// Демо-режим: детекции подставляются в центре кадра (проверка трекинга
+    /// Демо-детекция (цель-фантом в центре): проверка трекинга
     /// на реальных кадрах без распознаваемого моделью объекта)
     #[arg(long)]
     demo_detect: bool,
+    /// Включить живой MJPEG-стрим OSD (http://<ip>:<port>/, см. [stream]).
+    #[arg(long)]
+    stream: bool,
 }
 
 fn main() -> Result<()> {
@@ -79,6 +82,9 @@ fn main() -> Result<()> {
     }
     if let Some(o) = &args.output {
         cfg.output.dir = o.clone();
+    }
+    if args.stream {
+        cfg.stream.enabled = true;
     }
     std::fs::create_dir_all(&cfg.output.dir).ok();
 
@@ -125,6 +131,13 @@ struct Runner {
     demo_detect: bool,
 }
 
+/// Живой стрим OSD: сервер + канал к потоку-энкодеру JPEG.
+struct StreamCtx {
+    server: streaming::MjpegServer,
+    enc_tx: streaming::LatestSender<(Vec<u8>, u32, u32)>,
+    frame_div: u32,
+}
+
 impl Runner {
     fn new(cfg: AppConfig, synthetic: bool, demo_detect: bool) -> Result<Self> {
         Ok(Self {
@@ -162,6 +175,34 @@ impl Runner {
         };
         let mut hybrid = HybridTracker::new(nano, hybrid_cfg);
 
+        // === Стрим OSD (MJPEG-over-HTTP, ADR-009) ===
+        let stream_ctx = if cfg.stream.enabled {
+            let server = streaming::MjpegServer::start(&cfg.stream.bind)
+                .with_context(|| format!("bind {}", cfg.stream.bind))?;
+            tracing::info!(
+                port = server.port(),
+                "стрим MJPEG: http://<ip>:{}/ (браузер/VLC)", server.port()
+            );
+            let (enc_tx, enc_rx) = streaming::latest_channel::<(Vec<u8>, u32, u32)>();
+            let quality = cfg.stream.quality;
+            let srv = server.clone();
+            // Кодирование — вне бюджетного потока кадра (§4 HARDWARE_TEST_RESULTS).
+            let _enc = std::thread::Builder::new()
+                .name("mjpeg-encoder".into())
+                .spawn(move || {
+                    while let Some((rgb, w, h)) = enc_rx.recv() {
+                        match encode_jpeg_bytes(&rgb, w, h, quality) {
+                            Ok(j) => srv.push_jpeg(j),
+                            Err(e) => tracing::warn!(error = %e, "кадр стрима не закодирован"),
+                        }
+                    }
+                })
+                .context("spawn mjpeg-encoder")?;
+            Some(StreamCtx { server, enc_tx, frame_div: cfg.stream.frame_div })
+        } else {
+            None
+        };
+
         // === Детектор ===
         let (det_req_tx, det_req_rx) = std_mpsc::sync_channel::<(Vec<u8>, u32, u32, u64)>(1);
         let (det_resp_tx, det_resp_rx) = std_mpsc::sync_channel::<Result<DetectResult, String>>(1);
@@ -183,9 +224,9 @@ impl Runner {
         };
 
         let result = if self.synthetic {
-            self.run_synthetic(&cfg, &mut hybrid, &det_req_tx, &det_resp_rx, &mut stats, &mut telemetry, deadline)
+            self.run_synthetic(&cfg, &mut hybrid, stream_ctx.as_ref(), &det_req_tx, &det_resp_rx, &mut stats, &mut telemetry, deadline)
         } else {
-            self.run_camera(&cfg, &mut hybrid, &det_req_tx, &det_resp_rx, &mut stats, &mut telemetry, deadline)
+            self.run_camera(&cfg, &mut hybrid, stream_ctx.as_ref(), &det_req_tx, &det_resp_rx, &mut stats, &mut telemetry, deadline)
         };
 
         // === Итоги ===
@@ -217,12 +258,18 @@ impl Runner {
             );
         }
         // `let _ = det_req_tx;` здесь НЕ роняет канал: паттерн `_` не двигает
-        // place-expression (проверено на борту, gdb: воркер в recv(), main в
-        // join()). Явные drop обоих концов размыкают цикл воркера.
+        // place-expression (проверено gdb на борту — воркер в recv(), main в
+        // join()). Явные drop обоих концов размыкают цикл воркера (ADR-008).
         drop(det_req_tx);
         drop(det_resp_rx);
         if let Some(h) = det_handle {
             let _ = h.join();
+        }
+        if let Some(st) = &stream_ctx {
+            println!(
+                "стрим: {} кадров отдано зрителям",
+                st.server.served_frames()
+            );
         }
         result
     }
@@ -327,6 +374,7 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
         &self,
         cfg: &AppConfig,
         hybrid: &mut HybridTracker,
+        stream: Option<&StreamCtx>,
         det_req_tx: &std_mpsc::SyncSender<(Vec<u8>, u32, u32, u64)>,
         det_resp_rx: &std_mpsc::Receiver<Result<DetectResult, String>>,
         stats: &mut RunStats,
@@ -441,6 +489,14 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
             }
         }
 
+        // 4б) Живой стрим: кадр уже с OSD — отдаём энкодер-потоку, только
+        // если есть зрители (иначе JPEG-кодирование не тратит CPU вовсе).
+        if let Some(st) = stream {
+            if st.server.clients() > 0 && seq % st.frame_div.max(1) as u64 == 0 {
+                st.enc_tx.send((rgb.clone(), w, h));
+            }
+        }
+
         // 5) Телеметрия.
         if cfg.output.telemetry {
             let line = TelemetryLine {
@@ -474,6 +530,7 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
         &self,
         cfg: &AppConfig,
         hybrid: &mut HybridTracker,
+        stream: Option<&StreamCtx>,
         det_req_tx: &std_mpsc::SyncSender<(Vec<u8>, u32, u32, u64)>,
         det_resp_rx: &std_mpsc::Receiver<Result<DetectResult, String>>,
         stats: &mut RunStats,
@@ -537,7 +594,7 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
                 };
                 fps = fps_counter.tick();
                 self.process_frame(
-                    cfg, hybrid, det_req_tx, det_resp_rx, stats, telemetry,
+                    cfg, hybrid, stream, det_req_tx, det_resp_rx, stats, telemetry,
                     rgb_frame.data, w, h, seq, fps, &mut track_ms, &mut det_ms,
                 )?;
                 let _ = started;
@@ -555,6 +612,7 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
         &self,
         cfg: &AppConfig,
         hybrid: &mut HybridTracker,
+        stream: Option<&StreamCtx>,
         det_req_tx: &std_mpsc::SyncSender<(Vec<u8>, u32, u32, u64)>,
         det_resp_rx: &std_mpsc::Receiver<Result<DetectResult, String>>,
         stats: &mut RunStats,
@@ -604,7 +662,7 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
             let _ = det_resp_rx;
             fps = fps_counter.tick();
             self.process_frame(
-                cfg, hybrid, det_req_tx, det_resp_rx, stats, telemetry,
+                cfg, hybrid, stream, det_req_tx, det_resp_rx, stats, telemetry,
                 frame.data, w, h, seq, fps, &mut track_ms, &mut det_ms,
             )?;
             seq += 1;
@@ -672,27 +730,35 @@ fn serde_json_line(line: &TelemetryLine) -> String {
     )
 }
 
-fn save_jpeg(rgb: &[u8], w: u32, h: u32, path: &str) -> Result<()> {
-    let mut out = std::fs::File::create(path)?;
-    let mut encoder = jpeg_encoder::Encoder::new(&mut out, 80);
-    let mut buf = Vec::with_capacity(rgb.len() / 3);
-    // RGB24 → планарный для jpeg-encoder
-    let mut r = Vec::with_capacity(rgb.len() / 3);
-    let mut g = Vec::with_capacity(rgb.len() / 3);
-    let mut b = Vec::with_capacity(rgb.len() / 3);
-    for px in rgb.chunks_exact(3) {
-        r.push(px[0]);
-        g.push(px[1]);
-        b.push(px[2]);
+/// RGB24 → JPEG в память (планарная укладка для jpeg-encoder).
+fn encode_jpeg_bytes(rgb: &[u8], w: u32, h: u32, quality: u8) -> Result<Vec<u8>> {
+    let mut out = Vec::with_capacity(rgb.len() / 6);
+    {
+        let mut encoder = jpeg_encoder::Encoder::new(&mut out, quality);
+        let mut planar = Vec::with_capacity(rgb.len());
+        let mut r = Vec::with_capacity(rgb.len() / 3);
+        let mut g = Vec::with_capacity(rgb.len() / 3);
+        let mut b = Vec::with_capacity(rgb.len() / 3);
+        for px in rgb.chunks_exact(3) {
+            r.push(px[0]);
+            g.push(px[1]);
+            b.push(px[2]);
+        }
+        planar.extend_from_slice(&r);
+        planar.extend_from_slice(&g);
+        planar.extend_from_slice(&b);
+        encoder.encode(
+            &planar,
+            w as u16,
+            h as u16,
+            jpeg_encoder::ColorType::Rgb,
+        )?;
     }
-    buf.extend_from_slice(&r);
-    buf.extend_from_slice(&g);
-    buf.extend_from_slice(&b);
-    encoder.encode(
-        &buf,
-        w as u16,
-        h as u16,
-        jpeg_encoder::ColorType::Rgb,
-    )?;
+    Ok(out)
+}
+
+fn save_jpeg(rgb: &[u8], w: u32, h: u32, path: &str) -> Result<()> {
+    let bytes = encode_jpeg_bytes(rgb, w, h, 80)?;
+    std::fs::write(path, bytes)?;
     Ok(())
 }

@@ -11,6 +11,7 @@ pub struct AppConfig {
     pub tracker: TrackerConfig,
     pub pipeline: PipelineConfig,
     pub output: OutputConfig,
+    pub stream: StreamConfig,
 }
 
 impl Default for AppConfig {
@@ -21,6 +22,7 @@ impl Default for AppConfig {
             tracker: TrackerConfig::default(),
             pipeline: PipelineConfig::default(),
             output: OutputConfig::default(),
+            stream: StreamConfig::default(),
         }
     }
 }
@@ -118,6 +120,30 @@ impl Default for OutputConfig {
             snapshot_every: 30,
             telemetry: true,
             duration_secs: 0,
+        }
+    }
+}
+
+/// Живой MJPEG-стрим OSD (ADR-009): http://<ip>:<port>/ из браузера/VLC.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct StreamConfig {
+    pub enabled: bool,
+    /// Адрес привязки ("0.0.0.0:8080" — слушать все интерфейсы).
+    pub bind: String,
+    /// Отдавать каждый N-й кадр (2 ≈ 15 FPS при 30 камере).
+    pub frame_div: u32,
+    /// Качество JPEG (как у снапшотов).
+    pub quality: u8,
+}
+
+impl Default for StreamConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            bind: "0.0.0.0:8080".into(),
+            frame_div: 2,
+            quality: 80,
         }
     }
 }
