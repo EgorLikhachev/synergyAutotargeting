@@ -15,29 +15,81 @@
     "npu_runtime": "librknnrt.so 2.3.0 (apt rknpu2-rk3588)"
   },
   "milestones": [
-    { "id": "M0", "title": "плата готова", "status": "done",
-      "notes": "apt full-upgrade (395 пакетов), фикс dpkg-конфликта radxa-system-config-gdm3-disable-sleep, перезагрузка на 6.1.84, rustup, build-essential, v4l-utils" },
-    { "id": "M1", "title": "скелет workspace + SDD + push", "status": "done" },
-    { "id": "M1.5", "title": "локальная сборка/тесты Windows", "status": "done",
-      "notes": "37 юнит-тестов зелёные; synthetic-прогон: 175 кадров, 100% TRACKING, трекер в ~7px от истины, track ~20.7мс (x86)" },
-    { "id": "M2", "title": "capture на железе + FPS камеры", "status": "done",
-      "notes": "Arducam OV9782 /dev/video0, MJPG 640x480@30; захват держит ~31 FPS; грабли autosuspend и мёртвого UVC закрыты (ADR-008)" },
-    { "id": "M3", "title": "rknn-sys инференс на NPU + классы модели", "status": "done",
-      "notes": "copy-mode инференс 35.7 мс @640x640 (NPU core0); model_5_dynamic — 1 класс (целевой), в комнатной сцене объекта нет → 0 срабатываний; референс-проверка rknnlite OK" },
-    { "id": "M4", "title": "nano-track на борту (замер мс)", "status": "done",
-      "notes": "track ~30.3 мс/кадр на борту (tract, release); каналы/пады/гриды портированы 1:1 с OpenCV TrackerNano" },
-    { "id": "M5", "title": "гибрид на камере + OSD", "status": "done",
-      "notes": "полный цикл C на железе: 1132 кадра, 28.3 FPS, 100% TRACKING, 114 handoff'ов detect→track, OSD (рамка+текст) в JPEG-снапшотах, телеметрия JSONL" },
-    { "id": "M6", "title": "soak-тест + HARDWARE_TEST_RESULTS", "status": "done",
-      "notes": "330с: 9488 кадров, 28.7 FPS, 100% TRACKING, score 0.78-0.85, track 30.5мс без деградации, 0 ошибок; найден и закрыт shutdown-дедлок (let _ = не роняет канал); выход по duration и SIGTERM проверены" },
-    { "id": "M7", "title": "стрим/коммандер-скаффолд", "status": "partial",
-      "notes": "стрим OSD готов: push-режим (борта сам подключается, tools/viewer.py, без туннеля) 16 FPS / ~5 Мбит/с при 31.9 FPS пайплайна; гвард сбойного режима камеры 3×3; коммандер — фаза D роадмапа" },
-    { "id": "A", "title": "полевая валидация детекции", "status": "blocked",
-      "notes": "ждём эталонное видео/объект; критерии и план — docs/ROADMAP.md" },
-    { "id": "C", "title": "NanoTrack на NPU + камера 60 FPS", "status": "in_progress",
-      "notes": "старт 2026-09-02: конвертация rknn-toolkit2 (WSL/Docker), бэкенд tract|rknn, цель track<10мс; критично для наведения без стабилизации" },
-    { "id": "D", "title": "коммандер наведения (PID)", "status": "pending",
-      "notes": "вводные: цель — наведение; без гимбла — rate-mode всей платформой; нужен интерфейс исполнителя" },
-    { "id": "E", "title": "деплой: systemd, кросс-компиляция, soak 8ч", "status": "pending" }
+    {
+      "id": "M0",
+      "title": "плата готова",
+      "status": "done",
+      "notes": "apt full-upgrade (395 пакетов), фикс dpkg-конфликта radxa-system-config-gdm3-disable-sleep, перезагрузка на 6.1.84, rustup, build-essential, v4l-utils"
+    },
+    {
+      "id": "M1",
+      "title": "скелет workspace + SDD + push",
+      "status": "done"
+    },
+    {
+      "id": "M1.5",
+      "title": "локальная сборка/тесты Windows",
+      "status": "done",
+      "notes": "37 юнит-тестов зелёные; synthetic-прогон: 175 кадров, 100% TRACKING, трекер в ~7px от истины, track ~20.7мс (x86)"
+    },
+    {
+      "id": "M2",
+      "title": "capture на железе + FPS камеры",
+      "status": "done",
+      "notes": "Arducam OV9782 /dev/video0, MJPG 640x480@30; захват держит ~31 FPS; грабли autosuspend и мёртвого UVC закрыты (ADR-008)"
+    },
+    {
+      "id": "M3",
+      "title": "rknn-sys инференс на NPU + классы модели",
+      "status": "done",
+      "notes": "copy-mode инференс 35.7 мс @640x640 (NPU core0); model_5_dynamic — 1 класс (целевой), в комнатной сцене объекта нет → 0 срабатываний; референс-проверка rknnlite OK"
+    },
+    {
+      "id": "M4",
+      "title": "nano-track на борту (замер мс)",
+      "status": "done",
+      "notes": "track ~30.3 мс/кадр на борту (tract, release); каналы/пады/гриды портированы 1:1 с OpenCV TrackerNano"
+    },
+    {
+      "id": "M5",
+      "title": "гибрид на камере + OSD",
+      "status": "done",
+      "notes": "полный цикл C на железе: 1132 кадра, 28.3 FPS, 100% TRACKING, 114 handoff'ов detect→track, OSD (рамка+текст) в JPEG-снапшотах, телеметрия JSONL"
+    },
+    {
+      "id": "M6",
+      "title": "soak-тест + HARDWARE_TEST_RESULTS",
+      "status": "done",
+      "notes": "330с: 9488 кадров, 28.7 FPS, 100% TRACKING, score 0.78-0.85, track 30.5мс без деградации, 0 ошибок; найден и закрыт shutdown-дедлок (let _ = не роняет канал); выход по duration и SIGTERM проверены"
+    },
+    {
+      "id": "M7",
+      "title": "стрим/коммандер-скаффолд",
+      "status": "partial",
+      "notes": "стрим OSD готов: push-режим (борта сам подключается, tools/viewer.py, без туннеля) 16 FPS / ~5 Мбит/с при 31.9 FPS пайплайна; гвард сбойного режима камеры 3×3; коммандер — фаза D роадмапа"
+    },
+    {
+      "id": "A",
+      "title": "полевая валидация детекции",
+      "status": "blocked",
+      "notes": "ждём эталонное видео/объект; критерии и план — docs/ROADMAP.md"
+    },
+    {
+      "id": "C",
+      "title": "NanoTrack на NPU + камера 60 FPS",
+      "status": "done",
+      "notes": "track 30.3->6.21 мс (RKNN int8 mmse), пайплайн 59.9 FPS @640x480x60, score паритет с tract (0.881), 100% TRACKING; quirk'и librknnrt в ADR-011; критерии ROADMAP выполнены"
+    },
+    {
+      "id": "D",
+      "title": "коммандер наведения (PID)",
+      "status": "pending",
+      "notes": "вводные: цель — наведение; без гимбла — rate-mode всей платформой; нужен интерфейс исполнителя"
+    },
+    {
+      "id": "E",
+      "title": "деплой: systemd, кросс-компиляция, soak 8ч",
+      "status": "pending"
+    }
   ]
 }
