@@ -693,7 +693,9 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
                                     .get(&d.class_id)
                                     .copied()
                                     .unwrap_or(cfg.detector.conf_threshold);
-                                d.confidence >= t
+                                // Вырожденные полосы (h≈2px, conf ровно 0.5) —
+                                // артефакт int8-квантования SingleHead-выхода.
+                                d.confidence >= t && d.bbox.w >= 8.0 && d.bbox.h >= 8.0
                             })
                             .cloned()
                             .collect();

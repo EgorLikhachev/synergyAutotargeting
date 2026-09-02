@@ -58,10 +58,10 @@ def main():
         std_values=[[1, 1, 1]],
         target_platform="rk3588",
         optimization_level=3,
-        quantized_algorithm="mmse",
-        quantized_method="channel",
     )
     onnx = os.path.join(MODELS, "yolov8n.onnx")
+    # Вход выводим из статического ONNX (как в convert_nanotrack):
+    # явный input_size_list в тулките 2.3.2 ломает mean_values.
     if rk.load_onnx(model=onnx) != 0:
         sys.exit("load_onnx ошибка")
     if rk.build(do_quantization=True, dataset=ds) != 0:

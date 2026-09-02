@@ -91,6 +91,30 @@
       "title": "деплой: systemd, кросс-компиляция, soak 8ч",
       "status": "done",
       "notes": "systemd автозапуск + soak (RSS 51.6МБ стабильно, 65°C, 0 сбоев); кросс-компиляция WSL→aarch64 (deploy.sh, бинарь=нативный); bench-эталон; e2e 10.6мс; камера 100FPS→81; упреждение с фидфорвардом; бэклог: zero-copy, H.264"
+    },
+    {
+      "id": "N1",
+      "title": "GMC-стабилизация",
+      "status": "done",
+      "notes": "ADR-013: тряска 60px — потерь 2 vs 5, ре-захват 66 vs 101мс, <0.5мс/кадр"
+    },
+    {
+      "id": "N2",
+      "title": "H.264 запись (mpph264enc)",
+      "status": "done",
+      "notes": "ADR-015: сырой NV12 → rawvideoparse → mpph264enc, 333КБ/12с"
+    },
+    {
+      "id": "N3",
+      "title": "COCO-фолбэк",
+      "status": "partial",
+      "notes": "ADR-014: путь работает, int8 одного тензора [1,84,8400] = мусор; нужна 9-веточная модель"
+    },
+    {
+      "id": "N4",
+      "title": "CI",
+      "status": "done",
+      "notes": "тесты+clippy+кросс-проверка на пуш"
     }
   ]
 }
