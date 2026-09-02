@@ -31,6 +31,13 @@
     { "id": "M6", "title": "soak-тест + HARDWARE_TEST_RESULTS", "status": "done",
       "notes": "330с: 9488 кадров, 28.7 FPS, 100% TRACKING, score 0.78-0.85, track 30.5мс без деградации, 0 ошибок; найден и закрыт shutdown-дедлок (let _ = не роняет канал); выход по duration и SIGTERM проверены" },
     { "id": "M7", "title": "стрим/коммандер-скаффолд", "status": "partial",
-      "notes": "стрим OSD готов: MJPEG-over-HTTP (крейт streaming, чистый Rust), 15.3 FPS / 3.3 Мбит/с к зрителю, просадка пайплайна 0.1 FPS; просмотр через SSH-туннель (quirk ядра: входящие TCP к user-портам при активном NPU не проходят, ADR-009); mpph264enc проверен, H.264 отложен; коммандер/PID не начат" }
+      "notes": "стрим OSD готов: push-режим (борта сам подключается, tools/viewer.py, без туннеля) 16 FPS / ~5 Мбит/с при 31.9 FPS пайплайна; гвард сбойного режима камеры 3×3; коммандер — фаза D роадмапа" },
+    { "id": "A", "title": "полевая валидация детекции", "status": "blocked",
+      "notes": "ждём эталонное видео/объект; критерии и план — docs/ROADMAP.md" },
+    { "id": "C", "title": "NanoTrack на NPU + камера 60 FPS", "status": "in_progress",
+      "notes": "старт 2026-09-02: конвертация rknn-toolkit2 (WSL/Docker), бэкенд tract|rknn, цель track<10мс; критично для наведения без стабилизации" },
+    { "id": "D", "title": "коммандер наведения (PID)", "status": "pending",
+      "notes": "вводные: цель — наведение; без гимбла — rate-mode всей платформой; нужен интерфейс исполнителя" },
+    { "id": "E", "title": "деплой: systemd, кросс-компиляция, soak 8ч", "status": "pending" }
   ]
 }
