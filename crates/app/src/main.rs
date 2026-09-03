@@ -592,7 +592,12 @@ impl Runner {
         {
             let model_path = cfg.detector.model_path.clone();
             let input = cfg.detector.input_size;
-            let conf = cfg.detector.conf_threshold;
+            // diag: пол 0.05 — сырой лог виден весь фон (L2); рабочий
+            // порог всё равно применяется в process_frame.
+            let conf = match cfg.logging.mode {
+                config::LogMode::Diag => cfg.detector.conf_threshold.min(0.01),
+                config::LogMode::Battle => cfg.detector.conf_threshold,
+            };
             let nms = cfg.detector.nms_threshold;
             let class_names = cfg.detector.class_names.clone();
             let handle = std::thread::Builder::new()
@@ -894,10 +899,10 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
         for d in last_dets.iter() {
             osd::draw_rect(&mut rgb, w, h, &d.bbox, osd::Rgb::Red, 1);
         }
-        if seq % cfg.output.snapshot_every.max(1) as u64 == 0 {
-            let path = format!("{}/frame_{seq:06}.jpg", cfg.output.dir);
-            if let Err(e) = save_jpeg(&rgb, w, h, &path) {
-                tracing::warn!(error = %e, path = %path, "снапшот не сохранён");
+        // Снапшоты — только в diag-режиме (ADR-017), в каталог прогона.
+        if diag.enabled() && seq % cfg.output.snapshot_every.max(1) as u64 == 0 {
+            if let Ok(j) = encode_jpeg_bytes(&rgb, w, h, 80) {
+                diag.snapshot(seq, &j);
             }
         }
 
@@ -1158,7 +1163,7 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
                 perf.push(
                     cap_us,
                     dec_us,
-                    (*track_ms * 1000.0) as u64,
+                    (track_ms * 1000.0) as u64,
                     frame_recv.elapsed().as_micros() as u64,
                 );
                 perf.maybe_flush(stats.frames, diag);
