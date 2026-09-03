@@ -4,6 +4,7 @@
 
 mod config;
 mod control;
+mod diag;
 mod osd;
 mod synthetic;
 
@@ -74,6 +75,11 @@ struct Args {
     /// близость выходов на одинаковых кропах, включая проверку layout.
     #[arg(long)]
     diag_nets: bool,
+    /// Диагностический режим: полный сбор данных прогона
+    /// (каталог data/runs/…, telemetry/detections/commander/gmc/perf).
+    #[arg(long)]
+    diag: bool,
+
     /// Операторский UI: ADDR контрольного канала (напр. 192.168.0.174:9010);
     /// видео-стрим автоматически пушится на тот же хост, порт 9000.
     #[arg(long, value_name = "ADDR")]
@@ -124,6 +130,9 @@ fn main() -> Result<()> {
     }
     if args.shake > 0.0 {
         cfg.synthetic.shake_px = args.shake;
+    }
+    if args.diag {
+        cfg.logging.mode = config::LogMode::Diag;
     }
     if let Some(addr) = &args.ui {
         cfg.control.ui_addr = addr.clone();
@@ -193,6 +202,8 @@ struct CommanderCtx {
     sim: Option<commander::PlatformSim>,
     /// Разрешение наведения от оператора (АРМ); выкл — стики в центр.
     pub armed: bool,
+    /// Диагностика последнего тика (L3): err, vel, lead, каналы.
+    pub last_logged: Option<((f32, f32), (f32, f32), (f32, f32), [u16; 16])>,
 }
 
 impl CommanderCtx {
@@ -236,6 +247,7 @@ impl CommanderCtx {
             sent: 0,
             sim: None,
             armed: false,
+            last_logged: None,
         })
     }
 
@@ -276,6 +288,7 @@ impl CommanderCtx {
         if self.link.send_rc(&ch).is_ok() {
             self.sent += 1;
         }
+        self.last_logged = Some((self.law.last_info.0, self.law.last_info.1, self.law.last_info.2, ch));
         if let Some(sim) = &mut self.sim {
             sim.step(&ch, dt);
             tracing::debug!(
@@ -476,8 +489,15 @@ impl Runner {
         let det_handle = self.spawn_detector(&cfg, det_req_rx, det_resp_tx)?;
 
         // === Источник кадров ===
-        let tel_path = format!("{}/telemetry.jsonl", cfg.output.dir);
-        let mut telemetry = std::fs::File::create(&tel_path).context("создание telemetry.jsonl")?;
+        // Режимы (ADR-017): battle — без записи; diag — каталог прогона.
+        let mut diag = match cfg.logging.mode {
+            config::LogMode::Diag => diag::DiagSink::open(&cfg)
+                .context("создание каталога диагностики")?,
+            config::LogMode::Battle => {
+                tracing::info!("БОЕВОЙ режим: журналы прогона не пишутся");
+                diag::DiagSink::disabled()
+            }
+        };
 
         let mut stats = RunStats {
             frames: 0,
@@ -505,9 +525,9 @@ impl Runner {
         };
 
         let result = if self.synthetic {
-            self.run_synthetic(&cfg, &mut hybrid, stream_ctx.as_ref(), commander_ctx.as_mut(), control.as_ref(), &det_req_tx, &det_resp_rx, &mut stats, &mut telemetry, deadline)
+            self.run_synthetic(&cfg, &mut hybrid, stream_ctx.as_ref(), commander_ctx.as_mut(), control.as_ref(), &det_req_tx, &det_resp_rx, &mut stats, &mut diag, deadline)
         } else {
-            self.run_camera(&cfg, &mut hybrid, stream_ctx.as_ref(), commander_ctx.as_mut(), control.as_ref(), &det_req_tx, &det_resp_rx, &mut stats, &mut telemetry, deadline)
+            self.run_camera(&cfg, &mut hybrid, stream_ctx.as_ref(), commander_ctx.as_mut(), control.as_ref(), &det_req_tx, &det_resp_rx, &mut stats, &mut diag, deadline)
         };
 
         // === Итоги ===
@@ -673,7 +693,6 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
         det_req_tx: &std_mpsc::SyncSender<(Vec<u8>, u32, u32, u64)>,
         det_resp_rx: &std_mpsc::Receiver<Result<DetectResult, String>>,
         stats: &mut RunStats,
-        telemetry: &mut std::fs::File,
         mut rgb: Vec<u8>,
         w: u32,
         h: u32,
@@ -682,7 +701,7 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
         track_ms: &mut f32,
         det_ms: &mut Option<f32>,
         frame_recv: Instant,
-        detections_log: &mut Option<std::fs::File>,
+        diag: &mut diag::DiagSink,
         last_dets: &mut Vec<Detection>,
     ) -> Result<bool> {
         let mut last_det_conf = 0.0f32;
@@ -760,6 +779,11 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
                 match resp {
                     Ok(r) => {
                         *det_ms = Some(r.infer_ms);
+                        // L2: сырые детекции (до порога) — материал для
+                        // офлайн-выбора порога.
+                        for d in &r.detections {
+                            diag.raw_detection(seq, d.class_id, d.confidence, &d.bbox);
+                        }
                         // пер-класс пороги (фаза A): класс без записи — глобальный
                         let dets: Vec<Detection> = r
                             .detections
@@ -779,22 +803,8 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
                             .collect();
                         last_det_conf = dets.iter().map(|d| d.confidence).fold(0.0f32, f32::max);
                         *last_dets = dets.clone();
-                        if let Some(f) = detections_log.as_mut() {
-                            let ts = std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .map(|d| d.as_millis() as u64)
-                                .unwrap_or(0);
-                            for d in &dets {
-                                let l = format!(
-                                    "{{\"ts_ms\":{ts},\"frame_seq\":{seq},\"class\":{},\"conf\":{:.3},\"x\":{},\"y\":{},\"w\":{},\"h\":{}}}",
-                                    d.class_id, d.confidence,
-                                    d.bbox.x as i32, d.bbox.y as i32,
-                                    d.bbox.w as i32, d.bbox.h as i32
-                                );
-                                let _ = f.write_all(l.as_bytes());
-                                let _ = f.write_all(b"
-");
-                            }
+                        for d in &dets {
+                            diag.detection(seq, d.class_id, d.confidence, &d.bbox);
                         }
                         let r = DetectResult { detections: dets, infer_ms: r.infer_ms, frame_seq: r.frame_seq };
                         stats.detect_us_total += (r.infer_ms * 1000.0) as u128;
@@ -823,6 +833,10 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
         let tus = t0.elapsed().as_micros();
         // Полная латентность: получение кадра (до декодирования) → бокс готов.
         let e2e_us = frame_recv.elapsed().as_micros();
+        // L4: вибропрофиль — оценка глобального сдвига кадра.
+        if let Some((dx, dy)) = hybrid.last_gmc {
+            diag.gmc(seq, dx, dy);
+        }
         stats.track_us_total += tus;
         *track_ms = tus as f32 / 1000.0;
         stats.frames += 1;
@@ -902,6 +916,16 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
                 (cx, cy)
             });
             cmd.tick(state.mode, target, (w, h));
+            // L3: журнал тика для офлайн-тюнинга PID.
+            if diag.enabled() && cmd.last_logged.is_some() {
+                let (err, vel, lead, ch) = cmd.last_logged.unwrap();
+                let mode_s = match state.mode {
+                    Mode::Tracking => "TRACK",
+                    Mode::DetectAcquire => "ACQUIRE",
+                    Mode::Lost => "LOST",
+                };
+                diag.commander_tick(seq, mode_s, err, vel, lead, &ch, cmd.armed);
+            }
         }
 
         // 6) Статус операторскому UI (ADR-016).
@@ -939,7 +963,7 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
         }
 
         // 7) Телеметрия.
-        if cfg.output.telemetry {
+        if diag.enabled() {
             let line = TelemetryLine {
                 ts_ms: std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
@@ -963,7 +987,9 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
             };
             let mut s = serde_json_line(&line);
             s.push('\n');
-            telemetry.write_all(s.as_bytes()).ok();
+            if diag.enabled() {
+                diag.telemetry(&s);
+            }
         }
         Ok(true)
     }
@@ -991,7 +1017,7 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
         #[allow(unused_variables)]
         stats: &mut RunStats,
         #[allow(unused_variables)]
-        telemetry: &mut std::fs::File,
+        diag: &mut diag::DiagSink,
         #[allow(unused_variables)]
         deadline: Option<Instant>,
     ) -> Result<()> {
@@ -1079,10 +1105,10 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
             tracing::info!(device = %vcfg.device, "захват с камеры запущен");
 
             let started = Instant::now();
-            let mut det_log = open_detections_log(cfg);
             let mut last_dets: Vec<Detection> = Vec::new();
             let (mut fps, mut track_ms, mut det_ms) = (0f32, 0f32, None);
             let mut fps_counter = FpsCounter::new();
+            let mut perf = PerfState::new();
             loop {
                 if STOP.load(Ordering::SeqCst) {
                     tracing::info!("получен сигнал остановки");
@@ -1093,6 +1119,8 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
                         break;
                     }
                 }
+                // L5: время ожидания кадра (захват/джиттер камеры)
+                let cap_t0 = Instant::now();
                 let frame = match rt.block_on(async {
                     tokio::time::timeout(Duration::from_millis(500), rx.recv()).await
                 }) {
@@ -1106,23 +1134,34 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
                         continue;
                     }
                 };
+                let cap_us = cap_t0.elapsed().as_micros() as u64;
                 let (w, h, seq) = (
                     frame.metadata.width,
                     frame.metadata.height,
                     frame.metadata.seq,
                 );
                 let frame_recv = Instant::now(); // e2e: до декодирования
+                let dec_t0 = Instant::now();
                 let rgb_frame: Frame = if frame.metadata.format == PixelFormat::Mjpeg {
                     decode_mjpeg_to_rgb(&frame).context("декодирование MJPEG")?
                 } else {
                     frame
                 };
+                let dec_us = dec_t0.elapsed().as_micros() as u64;
                 fps = fps_counter.tick();
                 self.process_frame(
-                    cfg, hybrid, stream, commander.as_deref_mut(), control, det_req_tx, det_resp_rx, stats, telemetry,
+                    cfg, hybrid, stream, commander.as_deref_mut(), control, det_req_tx, det_resp_rx, stats,
                     rgb_frame.data, w, h, seq, fps, &mut track_ms, &mut det_ms,
-                    frame_recv, &mut det_log, &mut last_dets,
+                    frame_recv, diag, &mut last_dets,
                 )?;
+                // L5: сбор таймингов кадра (track_ms уже посчитан в process_frame)
+                perf.push(
+                    cap_us,
+                    dec_us,
+                    (*track_ms * 1000.0) as u64,
+                    frame_recv.elapsed().as_micros() as u64,
+                );
+                perf.maybe_flush(stats.frames, diag);
                 let _ = started;
             }
             rt.block_on(src.stop())?;
@@ -1146,7 +1185,7 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
         det_req_tx: &std_mpsc::SyncSender<(Vec<u8>, u32, u32, u64)>,
         det_resp_rx: &std_mpsc::Receiver<Result<DetectResult, String>>,
         stats: &mut RunStats,
-        telemetry: &mut std::fs::File,
+        diag: &mut diag::DiagSink,
         deadline: Option<Instant>,
     ) -> Result<()> {
         // Синтетический сценарий: квадрат движется по Лиссажу.
@@ -1154,7 +1193,6 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
         // эмулируем ответы прямо здесь.
         let (w, h) = (640u32, 480u32);
         let mut seq = 0u64;
-        let mut det_log = open_detections_log(cfg);
         let mut last_dets: Vec<Detection> = Vec::new();
         #[allow(unused_assignments)] // fps перезаписывается счётчиком до чтения
         let (mut fps, mut track_ms, mut det_ms) = (0f32, 0f32, None);
@@ -1196,14 +1234,83 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
             fps = fps_counter.tick();
             let frame_recv = Instant::now();
             self.process_frame(
-                cfg, hybrid, stream, commander.as_deref_mut(), control, det_req_tx, det_resp_rx, stats, telemetry,
+                cfg, hybrid, stream, commander.as_deref_mut(), control, det_req_tx, det_resp_rx, stats,
                 frame.data, w, h, seq, fps, &mut track_ms, &mut det_ms,
-                frame_recv, &mut det_log, &mut last_dets,
+                frame_recv, diag, &mut last_dets,
             )?;
             seq += 1;
             std::thread::sleep(Duration::from_millis(33)); // ~30 FPS
         }
         Ok(())
+    }
+}
+
+/// Сборщик производительности/здоровья (L5): p50/p95 каждые 5 с в perf.jsonl.
+struct PerfState {
+    started: Instant,
+    cap_us: Vec<u64>,
+    dec_us: Vec<u64>,
+    track_us: Vec<u64>,
+    e2e_us: Vec<u64>,
+    last_flush: Instant,
+}
+
+impl PerfState {
+    fn new() -> Self {
+        Self {
+            started: Instant::now(),
+            cap_us: Vec::with_capacity(512),
+            dec_us: Vec::with_capacity(512),
+            track_us: Vec::with_capacity(512),
+            e2e_us: Vec::with_capacity(512),
+            last_flush: Instant::now(),
+        }
+    }
+
+    fn push(&mut self, cap: u64, dec: u64, track: u64, e2e: u64) {
+        self.cap_us.push(cap);
+        self.dec_us.push(dec);
+        self.track_us.push(track);
+        self.e2e_us.push(e2e);
+    }
+
+    fn maybe_flush(&mut self, frames: u64, diag: &mut diag::DiagSink) {
+        if self.last_flush.elapsed() < Duration::from_secs(5) {
+            return;
+        }
+        let p = |v: &mut Vec<u64>| -> (f32, f32) {
+            if v.is_empty() {
+                return (0.0, 0.0);
+            }
+            v.sort_unstable();
+            let n = v.len();
+            let r = (v[n / 2] as f32 / 1000.0, v[(n * 95) / 100] as f32 / 1000.0);
+            v.clear();
+            r
+        };
+        let (cap50, cap95) = p(&mut self.cap_us);
+        let (dec50, dec95) = p(&mut self.dec_us);
+        let (tr50, tr95) = p(&mut self.track_us);
+        let (e50, e95) = p(&mut self.e2e_us);
+        let rss = std::fs::read_to_string("/proc/self/status")
+            .ok()
+            .and_then(|s| {
+                s.lines()
+                    .find(|l| l.starts_with("VmRSS:"))
+                    .and_then(|l| l.split_whitespace().nth(1).map(|v| v.to_string()))
+            })
+            .unwrap_or_default();
+        let temp = std::fs::read_to_string("/sys/class/thermal/thermal_zone0/temp")
+            .ok()
+            .and_then(|s| s.trim().parse::<f32>().ok().map(|t| t / 1000.0))
+            .unwrap_or(0.0);
+        let up = self.started.elapsed().as_secs();
+        let line = format!(
+            "{{\"t_s\":{up},\"frames\":{frames},\"cap_ms\":[{cap50:.2},{cap95:.2}],\"dec_ms\":[{dec50:.2},{dec95:.2}],\"track_ms\":[{tr50:.2},{tr95:.2}],\"e2e_ms\":[{e50:.2},{e95:.2}],\"rss_kb\":{rss},\"soc_c\":{temp:.1}}}
+"
+        );
+        diag.perf(&line);
+        self.last_flush = Instant::now();
     }
 }
 
@@ -1270,15 +1377,6 @@ fn spawn_h264_gst(path: &str) -> Result<(std::process::Child, std::process::Chil
         .with_context(|| "запуск gst-launch (пакет gstreamer1.0-rockchip1)")?;
     let stdin = child.stdin.take().context("stdin gst")?;
     Ok((child, stdin))
-}
-
-/// Открыть data/detections.jsonl (рядом с телеметрией).
-fn open_detections_log(cfg: &AppConfig) -> Option<std::fs::File> {
-    if !cfg.output.telemetry {
-        return None;
-    }
-    let path = format!("{}/detections.jsonl", cfg.output.dir);
-    std::fs::File::create(&path).ok()
 }
 
 fn noisy(mut b: common::BBox, amp: f32) -> common::BBox {

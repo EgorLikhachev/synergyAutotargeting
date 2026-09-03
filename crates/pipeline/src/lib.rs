@@ -83,6 +83,8 @@ pub struct HybridTracker {
     last_bbox: Option<BBox>,
     last_det_iou: Option<f32>,
     pub detect_inflight: bool,
+    /// Оценка глобального сдвига последнего кадра (GMC, L4).
+    pub last_gmc: Option<(f32, f32)>,
 }
 
 /// Решение о детекции: по расписанию раз в N кадров, а при потере — каждый
@@ -99,6 +101,7 @@ impl HybridTracker {
         Self {
             tracker,
             gmc,
+            last_gmc: None,
             stabilizer: Stabilizer::new(),
             config,
             frames_since_detect: 0,
@@ -223,6 +226,7 @@ impl HybridTracker {
         // (вибрация/поворот платформы) — трекер ищет в стабилизированной точке.
         if let Some(g) = self.gmc.as_mut() {
             let (dx, dy) = g.estimate(frame);
+            self.last_gmc = Some((dx, dy));
             if dx != 0.0 || dy != 0.0 {
                 self.tracker.shift_position(dx, dy);
             }

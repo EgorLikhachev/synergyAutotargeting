@@ -126,6 +126,11 @@ impl LeadPredictor {
         (p.0 + self.vel.0 * self.lead_s, p.1 + self.vel.1 * self.lead_s)
     }
 
+    /// Текущая оценка мировой скорости цели, px/с.
+    pub fn vel(&self) -> (f32, f32) {
+        self.vel
+    }
+
     pub fn reset(&mut self) {
         self.pos = None;
         self.vel = (0.0, 0.0);
@@ -177,13 +182,16 @@ pub struct AimLaw {
     lead: LeadPredictor,
     /// Прошлая RC-команда — оценка скорости платформы для упреждения.
     last_ch: [u16; 16],
+    /// Диагностика последнего update (L3): ошибка px, мировая скорость
+    /// цели, применённое упреждение.
+    pub last_info: ((f32, f32), (f32, f32), (f32, f32)),
 }
 
 impl AimLaw {
     pub fn new(cfg: AimConfig) -> Self {
         let lead = LeadPredictor::new(cfg.lead_alpha, cfg.lead_s);
         let (ax, ay) = (Axis::new(cfg.x), Axis::new(cfg.y));
-        Self { cfg, ax, ay, lead, last_ch: msp::center_channels() }
+        Self { cfg, ax, ay, lead, last_ch: msp::center_channels(), last_info: ((0.0, 0.0), (0.0, 0.0), (0.0, 0.0)) }
     }
 
     /// `target_px` — (x, y) центра цели в пикселях; `frame` — (w, h).
@@ -216,6 +224,12 @@ impl AimLaw {
         ch[3] = self.cfg.throttle_us;
         ch[4] = self.cfg.aux1_us;
         self.last_ch = ch;
+        // L3: диагностика тика для commander.jsonl
+        self.last_info = (
+            (err.0, err.1),
+            self.lead.vel(),
+            (aim.0 - target_px.0, aim.1 - target_px.1),
+        );
         ch
     }
 

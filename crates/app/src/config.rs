@@ -15,6 +15,7 @@ pub struct AppConfig {
     pub commander: CommanderConfig,
     pub synthetic: SyntheticConfig,
     pub control: ControlConfig,
+    pub logging: LoggingConfig,
 }
 
 impl Default for AppConfig {
@@ -29,6 +30,7 @@ impl Default for AppConfig {
             commander: CommanderConfig::default(),
             synthetic: SyntheticConfig::default(),
             control: ControlConfig::default(),
+            logging: LoggingConfig::default(),
         }
     }
 }
@@ -264,6 +266,26 @@ pub struct ControlConfig {
 impl Default for ControlConfig {
     fn default() -> Self {
         Self { ui_addr: String::new() }
+    }
+}
+
+/// Режимы работы (ADR-017): battle — ничего не пишем; diag — полный сбор.
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum LogMode {
+    Battle,
+    Diag,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct LoggingConfig {
+    pub mode: LogMode,
+}
+
+impl Default for LoggingConfig {
+    fn default() -> Self {
+        Self { mode: LogMode::Battle }
     }
 }
 
