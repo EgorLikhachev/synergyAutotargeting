@@ -1057,84 +1057,23 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
                 .enable_time()
                 .build()?;
 
-            // Быстрый re-open камеры (pkill и мгновенный перезапуск) иногда
-            // оставляет UVC в сбойном режиме: кадр правильного размера, но
-            // содержимое — реплика 3×3 (замечено на железе 2026-09-02).
-            // Валидируем первый кадр и пересоздаём источник с паузой.
-            let (mut rx, mut src) = 'valid: {
-                let mut fail: Option<(&str, f32)> = None;
-                for attempt in 1..=3u32 {
-                    let mut src = capture::V4l2DirectSource::new(
-                        vcfg.device.clone(),
-                        vcfg.width,
-                        vcfg.height,
-                        vcfg.fps,
-                    )
-                    .with_format(vcfg.format);
-                    let mut rx = match rt.block_on(src.start()) {
-                        Ok(rx) => rx,
-                        Err(e) => return Err(e).context("запуск захвата"),
-                    };
-                    let first = rt.block_on(async {
-                        tokio::time::timeout(Duration::from_secs(3), rx.recv()).await
-                    });
-                    let Ok(Some(frame)) = first else {
-                        tracing::warn!(attempt, "первый кадр не пришёл за 3 с");
-                        fail = Some(("нет кадра", 0.0));
-                        rt.block_on(src.stop()).ok();
-                        std::thread::sleep(Duration::from_secs(3));
-                        continue;
-                    };
-                    if frame.metadata.format == PixelFormat::Mjpeg {
-                        if let Ok(rgbf) = decode_mjpeg_to_rgb(&frame) {
-                            let tiled = frame_tiled_replication(
-                                &rgbf.data,
-                                rgbf.metadata.width,
-                                rgbf.metadata.height,
-                            );
-                            tracing::info!(
-                                attempt,
-                                tiled = tiled.0,
-                                mean_diff = tiled.1,
-                                "первый кадр проверен"
-                            );
-                            if tiled.0 {
-                                tracing::warn!(
-                                    attempt,
-                                    mean_diff = tiled.1,
-                                    "камера в сбойном режиме (кадр 3×3), пересоздаю источник"
-                                );
-                                fail = Some(("tiled", tiled.1));
-                                rt.block_on(src.stop()).ok();
-                                std::thread::sleep(Duration::from_secs(3));
-                                continue;
-                            }
-                        }
-                    }
-                    break 'valid (rx, src);
-                }
-                // три неудачи — работаем с тем, что есть (пустая стена
-                // тоже даёт похожие тайлы), но громко предупреждаем.
-                tracing::error!(fail = ?fail, "валидация первого кадра не прошла 3 раза, продолжаю");
-                let mut src = capture::V4l2DirectSource::new(
-                    vcfg.device.clone(),
-                    vcfg.width,
-                    vcfg.height,
-                    vcfg.fps,
-                )
-                .with_format(vcfg.format);
-                let rx = rt
-                    .block_on(src.start())
-                    .context("запуск захвата (после 3 попыток)")?;
-                (rx, src)
-            };
-            tracing::info!(device = %vcfg.device, "захват с камеры запущен");
+            // Сбойный режим UVC: кадр правильного размера, но содержимое —
+            // реплика 3×3. Возникает при быстром re-open и (зафиксировано
+            // 2026-09-02) посреди потока. Открытие с валидацией первого
+            // кадра вынесено в open_validated_camera — используется и на
+            // старте, и для восстановления посреди потока. detile=true —
+            // аварийный режим (один тайл на весь кадр).
+            let (mut rx, mut src, mut detile) = open_validated_camera(&rt, &vcfg)?;
+            tracing::info!(device = %vcfg.device, detile, "захват с камеры запущен");
 
             let started = Instant::now();
             let mut last_dets: Vec<Detection> = Vec::new();
             let (mut fps, mut track_ms, mut det_ms) = (0f32, 0f32, None);
             let mut fps_counter = FpsCounter::new();
             let mut perf = PerfState::new();
+            // Сбойный режим 3×3: периодическая проверка каждые 150 кадров
+            // (~5 с); при подозрении — подтверждение двумя соседними кадрами.
+            let (mut frames_since_check, mut tiled_streak) = (0u32, 0u32);
             loop {
                 if STOP.load(Ordering::SeqCst) {
                     tracing::info!("получен сигнал остановки");
@@ -1175,9 +1114,46 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
                 };
                 let dec_us = dec_t0.elapsed().as_micros() as u64;
                 fps = fps_counter.tick();
+                // Периодический контроль сбойного режима 3×3 (может
+                // наступить и посреди потока, зафиксировано на железе).
+                // В аварийном режиме detile проверка отключена.
+                if !detile {
+                    frames_since_check += 1;
+                    if tiled_streak > 0 || frames_since_check >= 150 {
+                        frames_since_check = 0;
+                        let (tiled, mean_diff) =
+                            frame_tiled_replication(&rgb_frame.data, w, h);
+                        if tiled {
+                            tiled_streak += 1;
+                            if tiled_streak == 1 {
+                                tracing::warn!(mean_diff, "подозрение на сбойный режим 3×3, подтверждаю соседними кадрами");
+                            }
+                        } else {
+                            tiled_streak = 0;
+                        }
+                        if tiled_streak >= 3 {
+                            tracing::warn!(mean_diff, seq, "камера ушла в сбойный режим 3×3 посреди потока — восстановление");
+                            rt.block_on(src.stop()).ok();
+                            let (nrx, nsrc, ndetile) = open_validated_camera(&rt, &vcfg)?;
+                            rx = nrx;
+                            src = nsrc;
+                            detile = ndetile;
+                            tiled_streak = 0;
+                            tracing::info!(detile, "камера восстановлена после сбойного режима 3×3");
+                            continue; // текущий (битый) кадр в пайплайн не отдаём
+                        }
+                    }
+                }
+                // Аварийный режим: один тайл на весь кадр (камера застряла
+                // в 3×3).
+                let frame_data = if detile {
+                    detile3x(&rgb_frame.data, w, h)
+                } else {
+                    rgb_frame.data
+                };
                 self.process_frame(
                     cfg, hybrid, stream, commander.as_deref_mut(), control, det_req_tx, det_resp_rx, stats,
-                    rgb_frame.data, w, h, seq, fps, &mut track_ms, &mut det_ms,
+                    frame_data, w, h, seq, fps, &mut track_ms, &mut det_ms,
                     frame_recv, diag, &mut last_dets,
                 )?;
                 // L5: сбор таймингов кадра (track_ms уже посчитан в process_frame)
@@ -1514,6 +1490,30 @@ fn noisy(mut b: common::BBox, amp: f32) -> common::BBox {
 /// размера, но содержимое — реплика одной сцены 3×3. У живой сцены соседние
 /// девятые кадра различаются заметно сильнее, чем копии. Возврат: (tiled,
 /// средняя |разность|). Однородная сцена (стена) не детектируется намеренно.
+/// Кадр без текстуры (тёмный прогрев автоэкспозиции): std < 5.
+#[cfg(target_os = "linux")]
+fn uniform_frame(rgb: &[u8]) -> bool {
+    let mut sum = 0u64;
+    let mut sum_sq = 0u64;
+    let mut n = 0u64;
+    for px in rgb.chunks_exact(3).step_by(97) {
+        let v = px[0] as u64;
+        sum += v;
+        sum_sq += v * v;
+        n += 1;
+    }
+    let mean = sum as f64 / n as f64;
+    let var = (sum_sq as f64 / n as f64 - mean * mean).max(0.0);
+    var.sqrt() < 5.0
+}
+
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))] // используется только камерой (и тестами)
+/// Порог mean_diff между девятыми кадра: сбойная реплика 3×3 ниже, живая
+/// сцена выше. Калибровка на живом железе (2026-09-02): реальный сбойный
+/// кадр дал 11.6 (тайлы — копии, но с небольшим яркостным смещением на
+/// тайл), чистая сцена той же камеры — 85. Порог 30 — середина с запасом.
+const TILED_MEAN_DIFF_LIMIT: f32 = 30.0;
+
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))] // используется только стартовым гвардом камеры
 fn frame_tiled_replication(rgb: &[u8], w: u32, h: u32) -> (bool, f32) {
     let (w, h) = (w as usize, h as usize);
@@ -1547,12 +1547,171 @@ fn frame_tiled_replication(rgb: &[u8], w: u32, h: u32) -> (bool, f32) {
         return (false, 0.0); // однородная сцена — не различить
     }
     let mean_diff = acc as f32 / diffs as f32;
-    (mean_diff < 6.0, mean_diff)
+    (mean_diff < TILED_MEAN_DIFF_LIMIT, mean_diff)
+}
+
+/// Аварийный режим «камера застряла в 3×3»: тайлы идентичны, поэтому
+/// берём левый верхний тайл и растягиваем на весь кадр (nearest ×3).
+/// Оператор получает цельную картинку (с ~3× зумом) вместо 9 копий.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn detile3x(rgb: &[u8], w: u32, h: u32) -> Vec<u8> {
+    let (w, h) = (w as usize, h as usize);
+    let (tw, th) = (w / 3, h / 3);
+    let mut out = vec![0u8; w * h * 3];
+    for y in 0..h {
+        let sy = y * th / h;
+        for x in 0..w {
+            let sx = x * tw / w;
+            let src = (sy * w + sx) * 3;
+            let dst = (y * w + x) * 3;
+            out[dst] = rgb[src];
+            out[dst + 1] = rgb[src + 1];
+            out[dst + 2] = rgb[src + 2];
+        }
+    }
+    out
+}
+
+/// Открытие камеры с валидацией первого кадра против сбойного режима 3×3.
+/// До 3 попыток с паузой 3 с; перед второй дополнительно USB reset драйвера
+/// uvcvideo (usb_camera_reset). Используется на старте и для восстановления
+/// посреди потока. Возвращает (rx, src, detile): если сбойный режим не
+/// прошёл после 3 попыток — работаем в аварийном режиме detile3x (один тайл
+/// на весь кадр), а не падаем в цикл перезапусков. Err — только если камера
+/// вообще не отдаёт кадры.
+#[cfg(target_os = "linux")]
+fn open_validated_camera(
+    rt: &tokio::runtime::Runtime,
+    vcfg: &capture::VideoSourceConfig,
+) -> Result<(
+    tokio::sync::mpsc::Receiver<Frame>,
+    capture::V4l2DirectSource,
+    bool,
+)> {
+    use capture::convert::decode_mjpeg_to_rgb;
+    use capture::traits::VideoSource;
+
+    let mut last_fail: Option<(&str, f32)> = None;
+    for attempt in 1..=3u32 {
+        if attempt > 1 {
+            if attempt == 2 {
+                usb_camera_reset();
+            }
+            std::thread::sleep(Duration::from_secs(3));
+        }
+        let mut src = capture::V4l2DirectSource::new(
+            vcfg.device.clone(),
+            vcfg.width,
+            vcfg.height,
+            vcfg.fps,
+        )
+        .with_format(vcfg.format);
+        let mut rx = match rt.block_on(src.start()) {
+            Ok(rx) => rx,
+            Err(e) => return Err(e).context("запуск захвата"),
+        };
+        // Автоэкспозиция прогревается тёмным кадром — гвард «однородной
+        // сцены» может пропустить тайлы. До 10 кадров ждём текстуру; если
+        // кадры идут, но сцена без текстуры (тёмная комната) — принимаем:
+        // тайл-проверка на таком кадре невозможна в принципе.
+        let mut first = None;
+        let mut last_uniform = None;
+        for _ in 0..10 {
+            match rt.block_on(async {
+                tokio::time::timeout(Duration::from_secs(3), rx.recv()).await
+            }) {
+                Ok(Some(f)) => {
+                    if let Ok(rgbf) = decode_mjpeg_to_rgb(&f) {
+                        if uniform_frame(&rgbf.data) {
+                            tracing::debug!("кадр однородный (прогрев экспозиции) — берём следующий");
+                            last_uniform = Some(f);
+                            continue;
+                        }
+                    }
+                    first = Some(f);
+                    break;
+                }
+                _ => break,
+            }
+        }
+        let frame = match first.or(last_uniform) {
+            Some(f) => f,
+            None => {
+                tracing::warn!(attempt, "кадр не пришёл за 3 с");
+                last_fail = Some(("нет кадра", 0.0));
+                rt.block_on(src.stop()).ok();
+                continue;
+            }
+        };
+        if frame.metadata.format == PixelFormat::Mjpeg {
+            if let Ok(rgbf) = decode_mjpeg_to_rgb(&frame) {
+                let (tiled, mean_diff) = frame_tiled_replication(
+                    &rgbf.data,
+                    rgbf.metadata.width,
+                    rgbf.metadata.height,
+                );
+                tracing::info!(attempt, tiled, mean_diff, "первый кадр проверен");
+                if tiled {
+                    tracing::warn!(
+                        attempt,
+                        mean_diff,
+                        "камера в сбойном режиме (кадр 3×3), пересоздаю источник"
+                    );
+                    last_fail = Some(("tiled", mean_diff));
+                    rt.block_on(src.stop()).ok();
+                    continue;
+                }
+            }
+        }
+        return Ok((rx, src, false));
+    }
+    // Камера отдаёт кадры, но застряла в 3×3 даже после USB reset —
+    // аварийный режим: один тайл на весь кадр (детект сетки отключаем,
+    // FOV сужается в 3 раза — громко предупреждаем).
+    if last_fail.is_some_and(|(why, _)| why == "tiled") {
+        tracing::error!(
+            "камера застряла в сбойном режиме 3×3 после всех попыток — \
+             включаю аварийный режим detile (один тайл на весь кадр, ~3× зум)"
+        );
+        let mut src = capture::V4l2DirectSource::new(
+            vcfg.device.clone(),
+            vcfg.width,
+            vcfg.height,
+            vcfg.fps,
+        )
+        .with_format(vcfg.format);
+        let rx = rt.block_on(src.start()).context("запуск захвата (detile)")?;
+        return Ok((rx, src, true));
+    }
+    Err(anyhow::anyhow!(
+        "камера {:?} не отдаёт кадры, последний сбой: {:?}",
+        vcfg.device,
+        last_fail
+    ))
+}
+
+/// USB reset драйвера uvcvideo (unbind/bind всех интерфейсов камеры).
+/// Требует root — вызывается через sudo-скрипт без пароля
+/// (tools/usb_camera_reset.sh + sudoers NOPASSWD на борту). Ошибки не
+/// фатальны: остаётся обычный re-open с паузой.
+#[cfg(target_os = "linux")]
+fn usb_camera_reset() {
+    const SCRIPT: &str = "/home/radxa/synergy/tools/usb_camera_reset.sh";
+    match std::process::Command::new("sudo")
+        .args(["-n", SCRIPT])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+    {
+        Ok(s) if s.success() => tracing::info!("USB reset uvcvideo выполнен"),
+        Ok(s) => tracing::warn!(?s, "usb_camera_reset.sh завершился неуспешно"),
+        Err(e) => tracing::warn!(%e, "USB reset недоступен (sudo NOPASSWD не настроен?)"),
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::frame_tiled_replication;
+    use super::{detile3x, frame_tiled_replication};
 
     #[test]
     fn tiled_replication_detected() {
@@ -1580,6 +1739,27 @@ mod tests {
         }
         let (tiled, d) = frame_tiled_replication(&rgb, w, h);
         assert!(tiled, "реплика 3×3 не распознана, mean_diff={d}");
+        // Реальный сбойный кадр с железа: тайлы — копии, но с небольшим
+        // яркостным смещением на тайл (замер: mean_diff ≈ 11.6).
+        let mut rgbo = rgb.clone();
+        for ty in 0..3usize {
+            for tx in 0..3usize {
+                let off = (ty * 9 + tx * 6) as u8;
+                for y in 0..h as usize / 3 {
+                    for x in 0..w as usize / 3 {
+                        let i = ((ty * h as usize / 3 + y) * w as usize
+                            + tx * w as usize / 3
+                            + x)
+                            * 3;
+                        for c in 0..3 {
+                            rgbo[i + c] = rgbo[i + c].wrapping_add(off);
+                        }
+                    }
+                }
+            }
+        }
+        let (tiled4, d4) = frame_tiled_replication(&rgbo, w, h);
+        assert!(tiled4, "реплика с яркостным смещением не распознана, mean_diff={d4}");
         // Различающаяся сцена (градиент по всему кадру) — не «тайл».
         let mut grad = vec![0u8; (w * h * 3) as usize];
         for i in 0..(w * h) as usize {
@@ -1592,6 +1772,35 @@ mod tests {
         let wall = vec![128u8; (w * h * 3) as usize];
         let (tiled3, _) = frame_tiled_replication(&wall, w, h);
         assert!(!tiled3);
+    }
+
+    #[test]
+    fn detile_picks_single_tile() {
+        // Кадр 6×3: левый верхний тайл 2×1 с уникальными значениями,
+        // реплицированный 3×3. После detile весь кадр = левый верхний тайл.
+        let (w, h) = (6u32, 3u32);
+        let (tw, th) = (2usize, 1usize);
+        let mut rgb = vec![0u8; (w * h * 3) as usize];
+        for ty in 0..3 {
+            for tx in 0..3 {
+                for y in 0..th {
+                    for x in 0..tw {
+                        let v = ((y * tw + x) * 30) as u8;
+                        let dst = ((ty * th + y) * w as usize + tx * tw + x) * 3;
+                        rgb[dst..dst + 3].fill(v);
+                    }
+                }
+            }
+        }
+        let out = detile3x(&rgb, w, h);
+        // Каждый пиксель результата = пиксель левого верхнего тайла.
+        for y in 0..h as usize {
+            for x in 0..w as usize {
+                let src = (y * th / h as usize * tw + x * tw / w as usize) * 3;
+                let dst = (y * w as usize + x) * 3;
+                assert_eq!(out[dst], rgb[src], "({x},{y})");
+            }
+        }
     }
 }
 
