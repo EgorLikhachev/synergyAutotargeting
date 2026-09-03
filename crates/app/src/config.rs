@@ -14,6 +14,7 @@ pub struct AppConfig {
     pub stream: StreamConfig,
     pub commander: CommanderConfig,
     pub synthetic: SyntheticConfig,
+    pub control: ControlConfig,
 }
 
 impl Default for AppConfig {
@@ -27,6 +28,7 @@ impl Default for AppConfig {
             stream: StreamConfig::default(),
             commander: CommanderConfig::default(),
             synthetic: SyntheticConfig::default(),
+            control: ControlConfig::default(),
         }
     }
 }
@@ -248,6 +250,20 @@ pub struct SyntheticConfig {
 impl Default for SyntheticConfig {
     fn default() -> Self {
         Self { shake_px: 0.0 }
+    }
+}
+
+/// Канал операторского UI (ADR-016): борт подключается к приложению сам.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct ControlConfig {
+    /// Адрес контрольного канала UI, напр. "192.168.0.174:9010"; пусто — выкл.
+    pub ui_addr: String,
+}
+
+impl Default for ControlConfig {
+    fn default() -> Self {
+        Self { ui_addr: String::new() }
     }
 }
 

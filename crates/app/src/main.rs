@@ -3,6 +3,7 @@
 //! Железо: Radxa ROCK 5A (RK3588S) + USB-камера Arducam.
 
 mod config;
+mod control;
 mod osd;
 mod synthetic;
 
@@ -73,6 +74,10 @@ struct Args {
     /// близость выходов на одинаковых кропах, включая проверку layout.
     #[arg(long)]
     diag_nets: bool,
+    /// Операторский UI: ADDR контрольного канала (напр. 192.168.0.174:9010);
+    /// видео-стрим автоматически пушится на тот же хост, порт 9000.
+    #[arg(long, value_name = "ADDR")]
+    ui: Option<String>,
     /// Тряска камеры в синтетике, px (стенд GMC-стабилизации).
     #[arg(long, default_value_t = 0.0)]
     shake: f32,
@@ -119,6 +124,13 @@ fn main() -> Result<()> {
     }
     if args.shake > 0.0 {
         cfg.synthetic.shake_px = args.shake;
+    }
+    if let Some(addr) = &args.ui {
+        cfg.control.ui_addr = addr.clone();
+        // видео к UI — на тот же хост, стандартный порт приёмника
+        if let Some(host) = addr.rsplit_once(':').map(|(h, _)| h) {
+            cfg.stream.push_to = format!("{host}:9000");
+        }
     }
     if let Some(addr) = &args.stream_push {
         cfg.stream.push_to = addr.clone();
@@ -179,6 +191,8 @@ struct CommanderCtx {
     last_sent: Instant,
     sent: u64,
     sim: Option<commander::PlatformSim>,
+    /// Разрешение наведения от оператора (АРМ); выкл — стики в центр.
+    pub armed: bool,
 }
 
 impl CommanderCtx {
@@ -221,7 +235,22 @@ impl CommanderCtx {
             last_sent: Instant::now() - Duration::from_secs(1),
             sent: 0,
             sim: None,
+            armed: false,
         })
+    }
+
+    /// АРМ/разарм от оператора; при выключении стики уходят в центр.
+    pub fn set_armed(&mut self, on: bool) {
+        if self.armed && !on {
+            let ch = self.law.lost();
+            let _ = self.link.send_rc(&ch);
+        }
+        self.armed = on;
+    }
+
+    /// Мгновенный СТОП: центры + разарм (UI/fail-safe).
+    pub fn emergency_stop(&mut self) {
+        self.set_armed(false);
     }
 
     /// Такт контура: цель в кадре → RC; потеря → центры.
@@ -236,6 +265,9 @@ impl CommanderCtx {
             return;
         }
         self.last_sent = now;
+        if !self.armed {
+            return; // не арт: команды не идут (безопасность по умолчанию)
+        }
         let dt = self.period.as_secs_f32();
         let ch = match (mode, target_px) {
             (pipeline::Mode::Tracking, Some((x, y))) => self.law.update((x, y), frame, dt),
@@ -458,6 +490,13 @@ impl Runner {
             lost_frames: 0,
         };
 
+        // === Канал операторского UI (ADR-016) ===
+        let control = if cfg.control.ui_addr.is_empty() {
+            None
+        } else {
+            Some(std::sync::Arc::new(control::ControlLink::start(&cfg.control.ui_addr)))
+        };
+
         // === Коммандер наведения (фаза D) ===
         let mut commander_ctx = if cfg.commander.enabled || cfg.commander.simulate {
             Some(CommanderCtx::new(&cfg)?)
@@ -466,9 +505,9 @@ impl Runner {
         };
 
         let result = if self.synthetic {
-            self.run_synthetic(&cfg, &mut hybrid, stream_ctx.as_ref(), commander_ctx.as_mut(), &det_req_tx, &det_resp_rx, &mut stats, &mut telemetry, deadline)
+            self.run_synthetic(&cfg, &mut hybrid, stream_ctx.as_ref(), commander_ctx.as_mut(), control.as_ref(), &det_req_tx, &det_resp_rx, &mut stats, &mut telemetry, deadline)
         } else {
-            self.run_camera(&cfg, &mut hybrid, stream_ctx.as_ref(), commander_ctx.as_mut(), &det_req_tx, &det_resp_rx, &mut stats, &mut telemetry, deadline)
+            self.run_camera(&cfg, &mut hybrid, stream_ctx.as_ref(), commander_ctx.as_mut(), control.as_ref(), &det_req_tx, &det_resp_rx, &mut stats, &mut telemetry, deadline)
         };
 
         // === Итоги ===
@@ -509,6 +548,9 @@ impl Runner {
         }
         if let Some(c) = &commander_ctx {
             println!("коммандер: {} RC-кадров, закон {} (swap_axes={})", c.sent, if cfg.commander.simulate { "СИМУЛЯЦИЯ" } else { "UART/MSP" }, cfg.commander.swap_axes);
+        }
+        if let Some(ctl) = &control {
+            println!("UI-канал: {} статусов отправлено (связь: {})", ctl.sent_status.load(std::sync::atomic::Ordering::Relaxed), ctl.connected());
         }
         if let Some(st) = &stream_ctx {
             let served = st.server.as_ref().map(|s| s.served_frames()).unwrap_or(0);
@@ -627,6 +669,7 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
         stream: Option<&StreamCtx>,
         #[allow(unused_mut)] // mut нужен linux-телу (as_deref_mut)
         mut commander: Option<&mut CommanderCtx>,
+        control: Option<&std::sync::Arc<control::ControlLink>>,
         det_req_tx: &std_mpsc::SyncSender<(Vec<u8>, u32, u32, u64)>,
         det_resp_rx: &std_mpsc::Receiver<Result<DetectResult, String>>,
         stats: &mut RunStats,
@@ -670,6 +713,36 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
                 stats.reacquires += 1;
             }
             stats.detections_hits += 1;
+        }
+
+        // 0) Команды операторского UI (ADR-016): lock/arm/stop.
+        if let Some(ctl) = control {
+            while let Some(cmd) = ctl.take_cmd() {
+                match cmd {
+                    control::UiCmd::Lock { x, y, size } => {
+                        let half = (size / 2.0).max(4.0);
+                        let bbox = common::BBox::new(x - half, y - half, size, size);
+                        let img = Img::new(rgb.clone(), w, h);
+                        let st = hybrid.on_manual_roi(bbox, &img);
+                        tracing::info!(x, y, size, mode = ?st.mode, "UI: ручной захват цели");
+                        stats.reacquires += 1;
+                    }
+                    control::UiCmd::Arm { on } => {
+                        if let Some(c) = commander.as_deref_mut() {
+                            c.set_armed(on);
+                        }
+                        ctl.set_armed(on);
+                        tracing::info!(on, "UI: АРМ наведения");
+                    }
+                    control::UiCmd::Stop => {
+                        if let Some(c) = commander.as_deref_mut() {
+                            c.emergency_stop();
+                        }
+                        ctl.set_armed(false);
+                        tracing::info!("UI: СТОП наведения");
+                    }
+                }
+            }
         }
 
         // 1) Отправить кадр на детекцию, если пора и детектор свободен.
@@ -831,7 +904,41 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
             cmd.tick(state.mode, target, (w, h));
         }
 
-        // 6) Телеметрия.
+        // 6) Статус операторскому UI (ADR-016).
+        if let Some(ctl) = control {
+            let dets_json: Vec<String> = last_dets
+                .iter()
+                .map(|d| {
+                    format!(
+                        "[{},{},{},{},{:.2}]",
+                        d.bbox.x as i32, d.bbox.y as i32,
+                        d.bbox.w as i32, d.bbox.h as i32, d.confidence
+                    )
+                })
+                .collect();
+            let box_json = state
+                .bbox
+                .map(|b| format!("[{},{},{},{}]", b.x as i32, b.y as i32, b.w as i32, b.h as i32))
+                .unwrap_or_else(|| "null".into());
+            let armed = commander
+                .as_deref()
+                .map(|c| c.armed)
+                .unwrap_or(false);
+            let line = format!(
+                "{{\"t\":\"status\",\"frame_seq\":{seq},\"mode\":\"{}\",\"score\":{:.3},\"fps\":{:.1},\"e2e_ms\":{:.2},\"box\":{box_json},\"dets\":[{}],\"armed\":{}}}
+",
+                match state.mode {
+                    Mode::Tracking => "TRACK",
+                    Mode::DetectAcquire => "ACQUIRE",
+                    Mode::Lost => "LOST",
+                },
+                state.score, fps, e2e_us as f32 / 1000.0,
+                dets_json.join(","), armed
+            );
+            ctl.send_status(line);
+        }
+
+        // 7) Телеметрия.
         if cfg.output.telemetry {
             let line = TelemetryLine {
                 ts_ms: std::time::SystemTime::now()
@@ -875,6 +982,8 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
         #[allow(unused_variables)]
         #[allow(unused_mut)] // mut нужен linux-телу (as_deref_mut)
         mut commander: Option<&mut CommanderCtx>,
+        #[allow(unused_variables)]
+        control: Option<&std::sync::Arc<control::ControlLink>>,
         #[allow(unused_variables)]
         det_req_tx: &std_mpsc::SyncSender<(Vec<u8>, u32, u32, u64)>,
         #[allow(unused_variables)]
@@ -1010,7 +1119,7 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
                 };
                 fps = fps_counter.tick();
                 self.process_frame(
-                    cfg, hybrid, stream, commander.as_deref_mut(), det_req_tx, det_resp_rx, stats, telemetry,
+                    cfg, hybrid, stream, commander.as_deref_mut(), control, det_req_tx, det_resp_rx, stats, telemetry,
                     rgb_frame.data, w, h, seq, fps, &mut track_ms, &mut det_ms,
                     frame_recv, &mut det_log, &mut last_dets,
                 )?;
@@ -1033,6 +1142,7 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
         stream: Option<&StreamCtx>,
         #[allow(unused_mut)] // mut нужен linux-телу (as_deref_mut)
         mut commander: Option<&mut CommanderCtx>,
+        control: Option<&std::sync::Arc<control::ControlLink>>,
         det_req_tx: &std_mpsc::SyncSender<(Vec<u8>, u32, u32, u64)>,
         det_resp_rx: &std_mpsc::Receiver<Result<DetectResult, String>>,
         stats: &mut RunStats,
@@ -1086,7 +1196,7 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
             fps = fps_counter.tick();
             let frame_recv = Instant::now();
             self.process_frame(
-                cfg, hybrid, stream, commander.as_deref_mut(), det_req_tx, det_resp_rx, stats, telemetry,
+                cfg, hybrid, stream, commander.as_deref_mut(), control, det_req_tx, det_resp_rx, stats, telemetry,
                 frame.data, w, h, seq, fps, &mut track_ms, &mut det_ms,
                 frame_recv, &mut det_log, &mut last_dets,
             )?;

@@ -188,6 +188,29 @@ impl HybridTracker {
         st
     }
 
+    /// Ручной захват цели оператором (двойной клик в UI): инициализация
+    /// трекера прямо на ROI, без детекции — первичная сигнатура цели.
+    pub fn on_manual_roi(&mut self, bbox: BBox, frame: &nano_track::imgops::Img) -> TargetState {
+        let mut box_ = bbox;
+        box_.clamp_to(frame.w, frame.h);
+        if box_.w < 8.0 || box_.h < 8.0 {
+            return self.state(Mode::Lost);
+        }
+        if let Err(e) = self.tracker.init(frame, box_) {
+            tracing::error!(error = %e, "init трекера (manual ROI) не удался");
+            return self.state(Mode::Lost);
+        }
+        self.stabilizer.clear();
+        self.stabilizer.set_hw([box_.w, box_.h]);
+        self.low_score_streak = 0;
+        self.detect_inflight = false;
+        self.last_det_iou = None;
+        self.last_bbox = Some(box_);
+        let mut st = self.state(Mode::DetectAcquire);
+        st.score = 1.0; // ручное назначение оператором
+        st
+    }
+
     /// Обработать кадр трекером (каждый кадр).
     pub fn on_frame(&mut self, frame: &nano_track::imgops::Img) -> TargetState {
         self.frames_since_detect += 1;
