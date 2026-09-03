@@ -115,6 +115,11 @@ tools/bench.sh
 
 # Aiming loop in simulation (no UART hardware)
 # config.toml: [commander] enabled=true, simulate=true
+
+# Operator desktop app (video + click-to-lock + ARM/STOP):
+cargo run --release -p operator-ui                 # listens :9000/:9010
+# on the board: synergy --duration 0 --ui <this-pc-ip>:9010
+# double-click on video = capture target; ARM/STOP control the aiming loop
 ```
 
 CLI flags: `--config PATH`, `--synthetic`, `--duration SEC`, `--demo-detect`,
@@ -145,6 +150,7 @@ crates/
   streaming/   MJPEG server + push mode (pure std)
   commander/   aiming: PID + slew/deadband + lead predictor, MSP v1 codec
   app/         CLI binary `synergy`: config, OSD, telemetry, recorder
+  operator-ui/ desktop app (egui): video, click-to-lock, ARM/STOP
 models/        ONNX (CPU) and RKNN (NPU int8) model files
 tools/         viewer.py, telemetry_report.py, bench.sh, deploy.sh,
                model conversion scripts, systemd unit

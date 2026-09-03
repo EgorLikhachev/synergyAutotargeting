@@ -10,6 +10,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - name: Системные зависимости (eframe/X11 для operator-ui)
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxcb1-dev libxrandr-dev libxi-dev libxcursor-dev libxinerama-dev libgl1-mesa-dev
       - uses: Swatinem/rust-cache@v2
       - name: Тесты (без npu — стабы)
         run: cargo test --workspace

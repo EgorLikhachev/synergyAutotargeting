@@ -9,6 +9,7 @@ members = [
     "crates/pipeline",
     "crates/streaming",
     "crates/commander",
+    "crates/operator-ui",
     "crates/app",
 ]
 

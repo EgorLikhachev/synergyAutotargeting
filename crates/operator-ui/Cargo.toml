@@ -1,0 +1,16 @@
+[package]
+name = "operator-ui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+eframe = "0.29"
+egui = "0.29"
+jpeg-decoder.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+
+[dependencies.serde]
+workspace = true
