@@ -8,3 +8,20 @@ snapshots/
 nohup.out
 .env
 config.toml
+# калибровка/замеры конвертации (генерируются с борта)
+calib_src.mjpg
+calib/
+# захваты и тестовые артефакты
+*.mjpg
+rec_*.mkv
+test_h264.mkv
+stream_*.log
+soak.log
+live.log
+viewer.log
+bench_baseline.txt
+# кросс-бинарь и локальные конфиги бортов
+synergy_cross
+synergy_new
+bench100.toml
+coco.toml

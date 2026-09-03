@@ -1,0 +1,24 @@
+name: docs
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - "**/*.md"
+      - ".github/workflows/docs.yml"
+
+jobs:
+  markdown-link-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Link checker (README/CONTRIBUTING/CHANGELOG + templates)
+        uses: lycheeverse/lychee-action@v2
+        with:
+          # Russian SDD docs contain shorthand references; check release files.
+          args: >-
+            --no-progress --max-retries 2
+            README.md CONTRIBUTING.md CHANGELOG.md SECURITY.md SUPPORT.md
+            CODE_OF_CONDUCT.md .github/PULL_REQUEST_TEMPLATE.md
+            .github/ISSUE_TEMPLATE/*.md
+          fail: true
