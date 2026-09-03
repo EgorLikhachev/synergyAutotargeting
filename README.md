@@ -107,8 +107,18 @@ python tools/viewer.py                     # listens :9000, browser at :9001
 ./target/release/synergy --duration 30 --record /tmp/run.mjpg
 ./target/release/synergy --duration 30 --record-h264 /tmp/run.mkv
 
-# Summarize a run
-python tools/telemetry_report.py data/telemetry.jsonl
+# Two run modes: battle (default, zero disk writes) vs diagnostics
+./target/release/synergy --duration 60           # battle: no logs
+./target/release/synergy --duration 60 --diag    # data/runs/<ts>/ full logs
+
+# Record footage, then replay it offline through the whole pipeline
+./target/release/synergy --duration 30 --record /tmp/run.mjpg
+./target/release/synergy --replay /tmp/run.mjpg --diag            # real-time
+./target/release/synergy --replay /tmp/run.mjpg --diag --replay-rate 0  # as fast as possible
+
+# Summarize a diagnostic run (or compare two)
+python tools/telemetry_report.py                  # latest run
+python tools/telemetry_report.py data/runs/A data/runs/B
 
 # Regression benchmark on the board (compares to the stored baseline)
 tools/bench.sh

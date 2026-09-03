@@ -81,3 +81,7 @@ simulate = false           # true — без UART (тесты контура)
 
 [synthetic]
 shake_px = 0.0             # тряска камеры в синтетике (стенд GMC, или --shake)
+
+[logging]
+mode = "battle"            # "battle" — без записи | "diag" — каталог data/runs/<время>/
+                           # (или флаг --diag)

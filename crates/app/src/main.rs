@@ -75,6 +75,14 @@ struct Args {
     /// близость выходов на одинаковых кропах, включая проверку layout.
     #[arg(long)]
     diag_nets: bool,
+    /// Оффлайн-прогон записи (.mjpg от --record) через весь пайплайн
+    /// (L7): детектор+трекер+телеметрия без железа. На борту — с NPU.
+    #[arg(long, value_name = "PATH")]
+    replay: Option<String>,
+    /// Скорость --replay: 1.0 = реальные 30 FPS, 0 = максимально быстро.
+    #[arg(long, default_value_t = 1.0)]
+    replay_rate: f32,
+
     /// Диагностический режим: полный сбор данных прогона
     /// (каталог data/runs/…, telemetry/detections/commander/gmc/perf).
     #[arg(long)]
@@ -147,7 +155,9 @@ fn main() -> Result<()> {
     }
     std::fs::create_dir_all(&cfg.output.dir).ok();
 
-    let run = Runner::new(cfg, args.synthetic, args.demo_detect)?;
+    let mut run = Runner::new(cfg, args.synthetic, args.demo_detect)?;
+    run.replay = args.replay.clone();
+    run.replay_rate = args.replay_rate;
     run.run()
 }
 
@@ -190,6 +200,9 @@ struct Runner {
     cfg: AppConfig,
     synthetic: bool,
     demo_detect: bool,
+    /// Оффлайн-прогон записи (L7): путь и множитель скорости (0 = макс).
+    replay: Option<String>,
+    replay_rate: f32,
 }
 
 /// Контур наведения (фаза D): закон + транспорт, отправка по rate_hz.
@@ -327,6 +340,8 @@ impl Runner {
             cfg,
             synthetic,
             demo_detect,
+            replay: None,
+            replay_rate: 1.0,
         })
     }
 
@@ -524,7 +539,13 @@ impl Runner {
             None
         };
 
-        let result = if self.synthetic {
+        let result = if let Some(path) = self.replay.clone() {
+            self.run_replay(
+                &path, self.replay_rate, &cfg, &mut hybrid, stream_ctx.as_ref(),
+                commander_ctx.as_mut(), control.as_ref(), &det_req_tx, &det_resp_rx,
+                &mut stats, &mut diag,
+            )
+        } else if self.synthetic {
             self.run_synthetic(&cfg, &mut hybrid, stream_ctx.as_ref(), commander_ctx.as_mut(), control.as_ref(), &det_req_tx, &det_resp_rx, &mut stats, &mut diag, deadline)
         } else {
             self.run_camera(&cfg, &mut hybrid, stream_ctx.as_ref(), commander_ctx.as_mut(), control.as_ref(), &det_req_tx, &det_resp_rx, &mut stats, &mut diag, deadline)
@@ -1179,6 +1200,64 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
     }
 
     #[allow(clippy::too_many_arguments)]
+    /// Оффлайн-прогон записи .mjpg через весь пайплайн (L7). На борту —
+    /// с реальным NPU-детектором; на ПК — трекер tract + ручной захват.
+    #[allow(clippy::too_many_arguments)]
+    fn run_replay(
+        &self,
+        path: &str,
+        rate: f32,
+        cfg: &AppConfig,
+        hybrid: &mut HybridTracker,
+        stream: Option<&StreamCtx>,
+        mut commander: Option<&mut CommanderCtx>,
+        control: Option<&std::sync::Arc<control::ControlLink>>,
+        det_req_tx: &std_mpsc::SyncSender<(Vec<u8>, u32, u32, u64)>,
+        det_resp_rx: &std_mpsc::Receiver<Result<DetectResult, String>>,
+        stats: &mut RunStats,
+        diag: &mut diag::DiagSink,
+    ) -> Result<()> {
+        let data = std::fs::read(path).with_context(|| format!("чтение {path}"))?;
+        let frames = split_mjpeg(&data);
+        if frames.is_empty() {
+            bail!("в {path} не найдено JPEG-кадров");
+        }
+        tracing::info!(frames = frames.len(), "replay: запись загружена");
+        let (w, h) = (640u32, 480u32);
+        let frame_period = Duration::from_secs_f32(1.0 / 30.0);
+        let mut last_dets: Vec<Detection> = Vec::new();
+        let (mut fps, mut track_ms, mut det_ms) = (0f32, 0f32, None);
+        let mut fps_counter = FpsCounter::new();
+        let started = Instant::now();
+        for (seq, jpeg) in frames.iter().enumerate() {
+            if STOP.load(Ordering::SeqCst) {
+                break;
+            }
+            let t0 = Instant::now();
+            let rgb = decode_jpeg_rgb(jpeg).context("декодирование кадра записи")?;
+            fps = fps_counter.tick();
+            self.process_frame(
+                cfg, hybrid, stream, commander.as_deref_mut(), control, det_req_tx, det_resp_rx, stats,
+                rgb, w, h, seq as u64, fps, &mut track_ms, &mut det_ms,
+                t0, diag, &mut last_dets,
+            )?;
+            // темп: 1.0 = реальные 30 FPS записи; 0 = без пауз
+            if rate > 0.0 {
+                let target = frame_period.div_f32(rate);
+                let spent = t0.elapsed();
+                if spent < target {
+                    std::thread::sleep(target - spent);
+                }
+            }
+        }
+        tracing::info!(
+            frames = frames.len(),
+            secs = started.elapsed().as_secs_f32(),
+            "replay завершён"
+        );
+        Ok(())
+    }
+
     fn run_synthetic(
         &self,
         cfg: &AppConfig,
@@ -1382,6 +1461,47 @@ fn spawn_h264_gst(path: &str) -> Result<(std::process::Child, std::process::Chil
         .with_context(|| "запуск gst-launch (пакет gstreamer1.0-rockchip1)")?;
     let stdin = child.stdin.take().context("stdin gst")?;
     Ok((child, stdin))
+}
+
+/// Разбор M-JPEG файла (конкатенация JPEG) на кадры.
+fn split_mjpeg(data: &[u8]) -> Vec<&[u8]> {
+    const SOI: [u8; 3] = [0xFF, 0xD8, 0xFF];
+    const EOI: [u8; 2] = [0xFF, 0xD9];
+    let mut out = Vec::new();
+    let mut i = 0;
+    while let Some(rel) = data[i..].windows(3).position(|w| *w == SOI) {
+        let start = i + rel;
+        let end = data[start + 3..]
+            .windows(2)
+            .position(|w| *w == EOI)
+            .map(|p| start + 3 + p + 2);
+        match end {
+            Some(e) if e <= data.len() => {
+                out.push(&data[start..e]);
+                i = e;
+            }
+            _ => break,
+        }
+    }
+    out
+}
+
+/// JPEG → RGB24 packed.
+fn decode_jpeg_rgb(jpeg: &[u8]) -> Result<Vec<u8>> {
+    let mut dec = jpeg_decoder::Decoder::new(jpeg);
+    let pixels = dec.decode().context("jpeg decode")?;
+    let info = dec.info().context("jpeg info")?;
+    match info.pixel_format {
+        jpeg_decoder::PixelFormat::RGB24 => Ok(pixels),
+        jpeg_decoder::PixelFormat::L8 => {
+            let mut rgb = Vec::with_capacity(pixels.len() * 3);
+            for &p in &pixels {
+                rgb.extend_from_slice(&[p, p, p]);
+            }
+            Ok(rgb)
+        }
+        _ => bail!("неподдерживаемый формат JPEG: {:?}", info.pixel_format),
+    }
 }
 
 fn noisy(mut b: common::BBox, amp: f32) -> common::BBox {
