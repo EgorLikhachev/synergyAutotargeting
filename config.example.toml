@@ -17,6 +17,12 @@ nms_threshold = 0.45
 # Имена классов заполняются после эмпирической проверки модели (см. docs/HARDWARE_TEST_RESULTS.md)
 class_names = []
 
+# ОТКЛЮЧЕНО (ADR-014): запасной COCO-детектор. Путь детекции работает,
+# но int8 единого выхода [1,84,8400] даёт conf=0.5 артефакт — нужна
+# 9-веточная модель. Код (декодер SingleHead, tools/convert_detector.py,
+# models/yolov8n_coco.rknn) сохранён. Включение — явной заменой:
+# model_path = "models/yolov8n_coco.rknn"  # 80 классов COCO (эксперимент)
+
 [tracker]
 backend = "tract"           # "tract" (CPU) | "rknn" (NPU, фаза C — трек <10 мс)
 backbone_path = "models/nanotrack_backbone_127.onnx"

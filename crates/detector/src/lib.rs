@@ -128,6 +128,13 @@ pub fn detect_layout(output_dims: &[Vec<u32>]) -> Option<OutputLayout> {
 pub struct YoloDecoder {
     pub config: DecoderConfig,
     pub layout: OutputLayout,
+
+    /// Одно-выходная модель [1, 4+Nc, anchors]: int8-квантование такого
+    /// тензора схлопывает cls-логиты (conf=0.5 артефакт, ADR-014).
+    /// Фича отключена до появления 9-веточного экспорта.
+    pub fn is_single_head(&self) -> bool {
+        matches!(self.layout, OutputLayout::SingleHead)
+    }
     /// Число классов, выведенное из формы выходов.
     pub num_classes: usize,
     /// Для SingleHead: (rows = 4+Nc, anchors).

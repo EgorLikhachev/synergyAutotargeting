@@ -564,6 +564,13 @@ impl Runner {
                             return;
                         }
                     };
+                    if decoder.is_single_head() {
+                        tracing::warn!(
+                            "SingleHead-модель: int8-квантование одного выхода "
+                            "даёт conf=0.5 артефакт (ADR-014); фича отключена — "
+                            "используйте 9-веточные модели (bkb)"
+                        );
+                    }
                     tracing::info!(
                         layout = ?decoder.layout,
                         classes = decoder.num_classes,
