@@ -3,6 +3,7 @@
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -65,6 +66,150 @@ pub struct VideoFrame {
     pub rgba: Vec<u8>,
 }
 
+/// Сводка активной/завершённой записи.
+#[derive(Clone, Default)]
+pub struct RecStats {
+    pub frames: u64,
+    pub bytes: u64,
+    /// Кадры, не попавшие в запись (диск не успевал — канал полон).
+    pub dropped: u64,
+    pub started: Option<Instant>,
+}
+
+/// Запись стрима в .mjpg: приёмный поток отдаёт сырые JPEG в канал,
+/// поток-писатель дописывает их в файл. Конкатенация JPEG — это ровно
+/// replay-формат борта (--replay) и обычный M-JPEG для VLC: без
+/// перекодирования, копия байтов стрима.
+pub struct Recorder {
+    tx: Mutex<Option<std::sync::mpsc::SyncSender<Vec<u8>>>>,
+    path: Mutex<Option<PathBuf>>,
+    stats: Arc<Mutex<RecStats>>,
+}
+
+impl Recorder {
+    pub fn new() -> Self {
+        Self {
+            tx: Mutex::new(None),
+            path: Mutex::new(None),
+            stats: Arc::new(Mutex::new(RecStats::default())),
+        }
+    }
+
+    pub fn is_recording(&self) -> bool {
+        self.tx.lock().unwrap().is_some()
+    }
+
+    pub fn stats(&self) -> RecStats {
+        self.stats.lock().unwrap().clone()
+    }
+
+    /// Путь текущей/последней записи.
+    pub fn path(&self) -> Option<PathBuf> {
+        self.path.lock().unwrap().clone()
+    }
+
+    /// Начать запись в файл `dir/synergy_ГГГГММДД_ЧЧММСС.mjpg`.
+    pub fn start(&self, dir: &std::path::Path) -> Result<PathBuf, String> {
+        if self.is_recording() {
+            return Err("запись уже идёт".into());
+        }
+        std::fs::create_dir_all(dir).map_err(|e| format!("каталог записи: {e}"))?;
+        let path = dir.join(format!("synergy_{}.mjpg", timestamp_local()));
+        let file = std::fs::File::create(&path).map_err(|e| format!("файл записи: {e}"))?;
+        let (tx, rx) = std::sync::mpsc::sync_channel::<Vec<u8>>(240);
+        let stats = self.stats.clone();
+        *stats.lock().unwrap() = RecStats { started: Some(Instant::now()), ..Default::default() };
+        let path2 = path.clone();
+        let _ = std::thread::Builder::new().name("rec-writer".into()).spawn(move || {
+            let mut w = std::io::BufWriter::with_capacity(4 * 1024 * 1024, file);
+            for frame in rx {
+                if w.write_all(&frame).is_err() {
+                    break;
+                }
+                let mut s = stats.lock().unwrap();
+                s.frames += 1;
+                s.bytes += frame.len() as u64;
+            }
+            // канал закрыт (stop) или ошибка записи — flush и закрытие при drop
+            let _ = w.flush();
+            let _ = path2;
+        });
+        *self.path.lock().unwrap() = Some(path.clone());
+        *self.tx.lock().unwrap() = Some(tx);
+        Ok(path)
+    }
+
+    /// Остановить запись, вернуть путь файла.
+    pub fn stop(&self) -> Option<PathBuf> {
+        let tx = self.tx.lock().unwrap().take();
+        drop(tx); // разрывает канал → писатель флашит и закрывает файл
+        self.stats.lock().unwrap().started = None;
+        self.path.lock().unwrap().clone()
+    }
+
+    /// Вызывается из видео-потока на каждый принятый кадр.
+    fn submit(&self, jpeg: &[u8]) {
+        let guard = self.tx.lock().unwrap();
+        if let Some(tx) = guard.as_ref() {
+            match tx.try_send(jpeg.to_vec()) {
+                Ok(()) => {}
+                Err(std::sync::mpsc::TrySendError::Full(_)) => {
+                    self.stats.lock().unwrap().dropped += 1;
+                }
+                Err(std::sync::mpsc::TrySendError::Disconnected(_)) => {}
+            }
+        }
+    }
+}
+
+/// Локальное время ГГГГММДД_ЧЧММСС без внешних зависимостей.
+fn timestamp_local() -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let (y, mth, d, h, m, s) = unsafe { local_datetime(secs) };
+    format!("{y:04}{mth:02}{d:02}_{h:02}{m:02}{s:02}")
+}
+
+/// Локальная дата-время через CRT (только Windows-сборка UI).
+#[cfg(target_os = "windows")]
+unsafe fn local_datetime(unix: i64) -> (i32, i32, i32, i32, i32, i32) {
+    #[repr(C)]
+    struct Tm {
+        tm_sec: i32, tm_min: i32, tm_hour: i32,
+        tm_mday: i32, tm_mon: i32, tm_year: i32, tm_wday: i32, tm_yday: i32, tm_isdst: i32,
+    }
+    extern "system" {
+        fn _localtime64(unix: *const i64) -> *mut Tm;
+    }
+    let tm = _localtime64(&unix);
+    if tm.is_null() {
+        return (1970, 1, 1, 0, 0, 0);
+    }
+    ((*tm).tm_year + 1900, (*tm).tm_mon + 1, (*tm).tm_mday,
+     (*tm).tm_hour, (*tm).tm_min, (*tm).tm_sec)
+}
+
+#[cfg(not(target_os = "windows"))]
+unsafe fn local_datetime(unix: i64) -> (i32, i32, i32, i32, i32, i32) {
+    // UTC-раскладка (дней с эпохи → гражданская дата, Говард Хиннант)
+    let days = unix.div_euclid(86_400);
+    let rem = unix.rem_euclid(86_400);
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let mth = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if mth <= 2 { y + 1 } else { y };
+    (y as i32, mth as i32, d as i32, (rem / 3600) as i32, ((rem % 3600) / 60) as i32, (rem % 60) as i32)
+}
+
+
 pub struct NetState {
     frame: Arc<Mutex<Option<VideoFrame>>>,
     frame_version: Arc<AtomicU64>,
@@ -73,6 +218,7 @@ pub struct NetState {
     status: Arc<Mutex<Option<Status>>>,
     cmd_tx: Arc<Mutex<Option<std::sync::mpsc::Sender<UiCommand>>>>,
     video_fps: Arc<Mutex<(Instant, u32, f32)>>, // (окно, кадры, fps)
+    rec: Arc<Recorder>,
 }
 
 impl NetState {
@@ -85,14 +231,20 @@ impl NetState {
             status: Arc::new(Mutex::new(None)),
             cmd_tx: Arc::new(Mutex::new(None)),
             video_fps: Arc::new(Mutex::new((Instant::now(), 0, 0.0))),
+            rec: Arc::new(Recorder::new()),
         };
-        spawn_video_listener(s.frame.clone(), s.frame_version.clone(), s.video_connected.clone(), s.video_fps.clone());
+        spawn_video_listener(s.frame.clone(), s.frame_version.clone(), s.video_connected.clone(), s.video_fps.clone(), s.rec.clone());
         spawn_control_listener(
             s.control_connected.clone(),
             s.status.clone(),
             s.cmd_tx.clone(),
         );
         s
+    }
+
+    /// Запись стрима (кнопка REC в UI).
+    pub fn recorder(&self) -> &Arc<Recorder> {
+        &self.rec
     }
 
     pub fn take_video_frame(&self) -> Option<VideoFrame> {
@@ -129,6 +281,7 @@ fn spawn_video_listener(
     version: Arc<AtomicU64>,
     connected: Arc<AtomicBool>,
     fps_meter: Arc<Mutex<(Instant, u32, f32)>>,
+    rec: Arc<Recorder>,
 ) {
     let _ = std::thread::Builder::new().name("video-rx".into()).spawn(move || {
         let listener = match TcpListener::bind("0.0.0.0:9000") {
@@ -158,6 +311,9 @@ fn spawn_video_listener(
                 while let Some((start, end)) = find_jpeg(&buf) {
                     let jpeg = buf[start..end].to_vec();
                     buf.drain(..end);
+                    // запись ведётся из сырого JPEG до декодирования:
+                    // перекодирования нет, файл = копия стрима
+                    rec.submit(&jpeg);
                     match decode_rgba(&jpeg) {
                         Some(rgba) => {
                             let v = version.fetch_add(1, Ordering::Relaxed) + 1;
@@ -321,5 +477,40 @@ mod tests {
         assert!(l.contains("\"t\":\"lock\""));
         let s = UiCommand::Stop.to_json();
         assert_eq!(s.trim(), "{\"t\":\"stop\"}");
+    }
+
+    #[test]
+    fn recorder_writes_concat_of_jpegs() {
+        let dir = std::env::temp_dir().join("synergy_rec_test");
+        let rec = Recorder::new();
+        let path = rec.start(&dir).expect("start");
+        let a = b"\xff\xd8\xff\xe0AAAA\xff\xd9".to_vec();
+        let b = b"\xff\xd8\xff\xe0BBBB\xff\xd9".to_vec();
+        rec.submit(&a);
+        rec.submit(&b);
+        let stopped = rec.stop();
+        assert_eq!(stopped.as_deref(), Some(path.as_path()));
+        assert!(!rec.is_recording());
+        // поток-писатель завершается асинхронно — даём ему момент
+        for _ in 0..50 {
+            if std::fs::metadata(&path).map(|m| m.len() >= (a.len() + b.len()) as u64).unwrap_or(false) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let data = std::fs::read(&path).expect("файл записи");
+        assert_eq!(data.len(), a.len() + b.len());
+        assert_eq!(&data[..a.len()], &a[..]);
+        assert_eq!(&data[a.len()..], &b[..]);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn timestamp_shape() {
+        let t = timestamp_local();
+        // ГГГГММДД_ЧЧММСС: 15 знаков с подчёркиванием на 9-й позиции
+        assert_eq!(t.len(), 15, "{t}");
+        assert_eq!(t.as_bytes()[8], b'_', "{t}");
+        assert!(t.bytes().all(|c| c.is_ascii_digit() || c == b'_'));
     }
 }

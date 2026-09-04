@@ -43,6 +43,10 @@ struct OperatorApp {
     ui_fps: f32,
     ui_fps_acc: (std::time::Instant, u32),
     last_frame_time: std::time::Instant,
+    /// Путь последней сохранённой записи (показываем ~10 c после стопа).
+    last_rec: Option<(String, std::time::Instant)>,
+    /// Ошибка запуска записи (показываем ~5 c).
+    rec_error: Option<(String, std::time::Instant)>,
 }
 
 impl OperatorApp {
@@ -63,7 +67,17 @@ impl OperatorApp {
             ui_fps: 0.0,
             ui_fps_acc: (std::time::Instant::now(), 0),
             last_frame_time: std::time::Instant::now(),
+            last_rec: None,
+            rec_error: None,
         }
+    }
+
+    /// Каталог записей: рядом с exe (dist-папка/ярлык держат WorkingDirectory).
+    fn records_dir() -> std::path::PathBuf {
+        std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|d| d.join("records")))
+            .unwrap_or_else(|| std::path::PathBuf::from("records"))
     }
 
     /// Экранная точка → координаты кадра (учёт letterbox/масштаба).
@@ -140,6 +154,44 @@ impl eframe::App for OperatorApp {
                         // тумблер fullscreen
                         let fs = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
                         ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!fs));
+                    }
+                    ui.separator();
+                    // ЗАПИСЬ стрима в .mjpg (replay-формат борта, открывается VLC)
+                    let rec = self.net.recorder();
+                    if rec.is_recording() {
+                        let st = rec.stats();
+                        let secs = st.started.map(|t| t.elapsed().as_secs()).unwrap_or(0);
+                        let (mm, ss) = (secs / 60, secs % 60);
+                        let btn = egui::Button::new(
+                            egui::RichText::new(format!(
+                                "■ СТОП · {:02}:{:02} · {} кадров · {:.1} МБ",
+                                mm, ss, st.frames, st.bytes as f32 / 1e6
+                            ))
+                            .size(14.0)
+                            .strong(),
+                        )
+                        .fill(Color32::from_rgb(170, 30, 30))
+                        .min_size(egui::vec2(210.0, 30.0));
+                        if ui.add(btn).clicked() {
+                            if let Some(p) = rec.stop() {
+                                self.last_rec =
+                                    Some((p.display().to_string(), std::time::Instant::now()));
+                            }
+                        }
+                    } else {
+                        let btn = egui::Button::new(
+                            egui::RichText::new("● ЗАПИСЬ").size(14.0).strong(),
+                        )
+                        .min_size(egui::vec2(110.0, 30.0));
+                        let resp = ui.add_enabled(video_ok, btn);
+                        if resp.clicked() {
+                            match rec.start(&Self::records_dir()) {
+                                Ok(_) => self.rec_error = None,
+                                Err(e) => {
+                                    self.rec_error = Some((e, std::time::Instant::now()))
+                                }
+                            }
+                        }
                     }
                 });
             });
@@ -250,6 +302,29 @@ impl eframe::App for OperatorApp {
                         .size(13.0)
                         .color(Color32::from_rgb(220, 180, 60)),
                     );
+                }
+            }
+            // путь сохранённой записи / ошибка записи
+            if let Some((path, t)) = &self.last_rec {
+                if t.elapsed().as_secs_f32() < 10.0 {
+                    ui.label(
+                        egui::RichText::new(format!("запись сохранена: {path}"))
+                            .size(13.0)
+                            .color(Color32::from_rgb(120, 200, 120)),
+                    );
+                } else {
+                    self.last_rec = None;
+                }
+            }
+            if let Some((e, t)) = &self.rec_error {
+                if t.elapsed().as_secs_f32() < 5.0 {
+                    ui.label(
+                        egui::RichText::new(format!("ошибка записи: {e}"))
+                            .size(13.0)
+                            .color(Color32::from_rgb(230, 90, 90)),
+                    );
+                } else {
+                    self.rec_error = None;
                 }
             }
             ui.add_space(6.0);
