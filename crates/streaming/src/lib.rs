@@ -345,7 +345,6 @@ mod tests {
         let (mut sock, _) = listener.accept().unwrap();
         // Подключение могло случиться до head — читаем с таймаутом.
         sock.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
-        let mut all: Vec<u8> = Vec::new();
         let mut chunk = [0u8; 8192];
         // connected поднимается после записи head — ждём готовности.
         for _ in 0..100 {
