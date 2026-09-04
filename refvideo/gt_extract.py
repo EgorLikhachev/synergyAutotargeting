@@ -54,7 +54,7 @@ def best_blob(g_inv: np.ndarray):
 
 
 def main():
-    outdir = r"C:\dev\synergyAutotargeting\refvideo\gt"
+    outdir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gt")
     os.makedirs(outdir, exist_ok=True)
     files = sorted(glob.glob(os.path.join(SRC, "*", "*.mp4")))
     for f in files:

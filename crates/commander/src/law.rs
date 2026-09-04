@@ -1,7 +1,7 @@
 //! Закон наведения: ошибка в пикселях → RC-каналы (мкс).
-//! Порт сути bkb `utils/shim.py` (фаза D, ADR-012): нормировка ошибки,
+//! Порт закона наведения (фаза D, ADR-012): нормировка ошибки,
 //! мёртвая зона, P/PID-усиление, ограничение slew, свап/реверс осей
-//! (камера может стоять повёрнутой на 90°, как в bkb).
+//! (камера может стоять повёрнутой на 90°).
 
 /// Параметры одного канала (ось X или Y).
 #[derive(Debug, Clone, Copy)]
@@ -14,7 +14,7 @@ pub struct AxisParams {
     pub kd: f32,
     /// Мёртвая зона, px (внутри — центр 1500).
     pub deadband_px: f32,
-    /// Максимальный шаг выхода за тик, мкс (slew-лимит bkb one_step).
+    /// Максимальный шаг выхода за тик, мкс (slew-лимит one_step).
     pub slew_us: f32,
     /// Инвертировать знак (реверс серво).
     pub reverse: bool,
@@ -22,7 +22,7 @@ pub struct AxisParams {
 
 impl Default for AxisParams {
     fn default() -> Self {
-        // Стартовые значения из bkb: gain 2.0, мёртвая зона ~1% кадра,
+        // Стартовые значения обкатаны в поле: gain 2.0, мёртвая зона ~1% кадра,
         // шаг 3..8 мкс на тик 30 Гц.
         Self {
             kp: 2.0,
@@ -137,7 +137,7 @@ impl LeadPredictor {
     }
 }
 
-/// Конфиг маппинга осей на RC-каналы (порты из bkb: roll→ch0, pitch→ch1,
+/// Конфиг маппинга осей на RC-каналы (каналы: roll→ch0, pitch→ch1,
 /// yaw→ch2, throttle→ch3, aux1=ch4 — ARM).
 #[derive(Debug, Clone, Copy)]
 pub struct AimConfig {
@@ -145,7 +145,7 @@ pub struct AimConfig {
     pub x: AxisParams,
     /// Ось «вверх-вниз по кадру» (пиксельный Y).
     pub y: AxisParams,
-    /// Свап осей (камера повёрнута на 90°, как в bkb).
+    /// Свап осей (камера повёрнута на 90°).
     pub swap_axes: bool,
     /// Постоянные каналы: throttle (ch3) и aux1 (ch4, ARM-уровень).
     pub throttle_us: u16,

@@ -2,13 +2,13 @@
 //!
 //! Дословный порт OpenCV TrackerNanoImpl (modules/video/src/tracking/
 //! tracker_nano.cpp,OpenCV 4.x; сам он — адаптация NanoTrack от HonglinChu).
-//! Числовой паритет важен: bkb гонял именно OpenCV-реализацию в поле.
+//! Числовой паритет важен: референс — OpenCV-реализация, обкатанная в поле.
 //!
 //! Сохранена даже особенность оригинала: в scale-penalty используется
 //! sizeCal(targetPos) — позиция цели вместо размера (см. update()).
 //!
-//! Модели: nanotrack_backbone_sim.onnx + nanotrack_head_sim.onnx (из bkb,
-//! origin — OpenCV Zoo). template 127×127, search 255×255, scoreSize 16.
+//! Модели: nanotrack_backbone_sim.onnx + nanotrack_head_sim.onnx (origin —
+//! OpenCV Zoo). template 127×127, search 255×255, scoreSize 16.
 
 pub mod backend_tract;
 pub mod gmc;
@@ -208,7 +208,7 @@ impl NanoTracker {
 
         // === Пенальти (дословно из OpenCV-порта) ===
         // scale penalty; ВНИМАНИЕ: оригинал делит на sizeCal(targetPos) —
-        // особенность OpenCV-порта, сохраняем для числового паритета с bkb.
+        // особенность OpenCV-порта, сохраняем для числового паритета с полевым референсом.
         let sc_denom = size_cal(self.target_pos[0], self.target_pos[1]);
         let mut sc = vec![0f32; ss * ss];
         for i in 0..ss * ss {

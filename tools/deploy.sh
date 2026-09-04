@@ -7,18 +7,21 @@ set -euo pipefail
 IP="${1:-192.168.0.224}"
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 
+# Путь репозитория в WSL (не зависим от того, где лежит checkout)
+WINREPO="$(cygpath -w "$REPO")"
+WREPO="$(wsl -d Ubuntu -e wslpath -a "$WINREPO" | tr -d '\r')"
+
 echo "== 1/4 кросс-сборка (WSL, aarch64) =="
 wsl -d Ubuntu -e bash -c "
   export PATH=\$PATH:/root/.cargo/bin
-  cd /mnt/c/dev/synergyAutotargeting 2>/dev/null || cd '$REPO'
+  cd '$WREPO' || exit 1
   CARGO_TARGET_DIR=/root/xtarget RKNN_LIB_DIR=/root/aarch64-libs \
-    cargo build --release --target aarch64-unknown-linux-gnu --features npu
-  aarch64-linux-gnu-strip -o /mnt/c/dev/synergyAutotargeting/synergy_cross \
-    /root/xtarget/aarch64-unknown-linux-gnu/release/synergy
+    cargo build --release --target aarch64-unknown-linux-gnu --features npu &&
+  aarch64-linux-gnu-strip -o '$WREPO/synergy_cross' \
+    /root/xtarget/aarch64-unknown-linux-gnu/release/synergy &&
   # WSL Ubuntu 24.04 линкуется против glibc 2.39, а борт (Debian 12) — 2.36:
   # вырезаем требования версий новее 2.36 (слабые pidfd_* из Rust std).
-  python3 /mnt/c/dev/synergyAutotargeting/tools/strip_glibc_verneed.py \
-    /mnt/c/dev/synergyAutotargeting/synergy_cross 36
+  python3 '$WREPO/tools/strip_glibc_verneed.py' '$WREPO/synergy_cross' 36
 " | tail -2
 
 echo "== 2/4 доставка на борт =="

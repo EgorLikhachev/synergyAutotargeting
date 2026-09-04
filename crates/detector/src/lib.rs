@@ -1,9 +1,9 @@
 //! YOLOv8-декодер для RKNN-выходов. Поддерживает два layout-а:
 //!
-//! 1. **bkb (6 выходов)**: 3 ветки × (box [1,64,Gh,Gw], cls [1,Nc,Gh,Gw]).
+//! 1. **YoloBranches (6 выходов)**: 3 ветки × (box [1,64,Gh,Gw], cls [1,Nc,Gh,Gw]).
 //!    DFL-декод, координаты через grid+stride. Классы уже после sigmoid
-//!    (экспорт по рецепту rknn_model_zoo). Порт `utils/yolov8_utils.py` из bkb.
-//! 2. **Autotargeting (1 выход)**: [1, 4+Nc, A] в пикселях 640-пространства,
+//!    (экспорт по рецепту rknn_model_zoo). Порт декодера yolov8_utils предшественника.
+//! 2. **SingleHead (1 выход)**: [1, 4+Nc, A] в пикселях 640-пространства,
 //!    классы — сырые логиты, нужен sigmoid (ADR D-010).
 //!
 //! Layout выбирается автоматически по числу выходов и их форме.
@@ -88,8 +88,8 @@ pub struct DecoderConfig {
     pub nms_threshold: f32,
     /// Имена классов (по индексу; лишние игнорируются, недостающие — "class_N").
     pub class_names: Vec<String>,
-    /// Считать классы логитами и применить sigmoid (layout Autotargeting).
-    /// Для bkb-6 автодетект выставит false.
+    /// Считать классы логитами и применить sigmoid (layout SingleHead).
+    /// Для YoloBranches-6 автодетект выставит false.
     pub sigmoid_classes: bool,
 }
 
@@ -108,7 +108,7 @@ impl Default for DecoderConfig {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OutputLayout {
     /// 6 (или 3) выходов: пары (box_dfl, cls) на каждую ветку.
-    BkbBranches,
+    YoloBranches,
     /// 1 выход [1, 4+Nc, A].
     SingleHead,
 }
@@ -119,7 +119,7 @@ pub fn detect_layout(output_dims: &[Vec<u32>]) -> Option<OutputLayout> {
         return Some(OutputLayout::SingleHead);
     }
     if output_dims.len() >= 6 {
-        return Some(OutputLayout::BkbBranches);
+        return Some(OutputLayout::YoloBranches);
     }
     None
 }
@@ -153,7 +153,7 @@ impl YoloDecoder {
                     None => return None,
                 }
             }
-            OutputLayout::BkbBranches => {
+            OutputLayout::YoloBranches => {
                 // cls-выходы — нечётные индексы: [1, Nc, Gh, Gw].
                 let dims = output_dims.get(1)?;
                 if dims.len() == 4 {
@@ -166,7 +166,7 @@ impl YoloDecoder {
         let mut config = config;
         let single_shape = match layout {
             OutputLayout::SingleHead => single_head_shape(&output_dims[0])?,
-            OutputLayout::BkbBranches => (0, 0),
+            OutputLayout::YoloBranches => (0, 0),
         };
         if layout == OutputLayout::SingleHead {
             config.sigmoid_classes = true;
@@ -199,7 +199,7 @@ impl YoloDecoder {
             OutputLayout::SingleHead => {
                 self.decode_single(&outputs[0], output_dims[0].clone(), lb)
             }
-            OutputLayout::BkbBranches => self.decode_branches(outputs, output_dims, lb),
+            OutputLayout::YoloBranches => self.decode_branches(outputs, output_dims, lb),
         };
 
         // Порог + валидность бокса.
@@ -257,7 +257,7 @@ impl YoloDecoder {
             .unwrap_or_else(|| format!("class_{id}"))
     }
 
-    /// Layout Autotargeting: [1, 4+Nc, A], координаты в пикселях target-пространства.
+    /// Layout SingleHead: [1, 4+Nc, A], координаты в пикселях target-пространства.
     fn decode_single(
         &self,
         out: &[f32],
@@ -309,7 +309,7 @@ impl YoloDecoder {
         cands
     }
 
-    /// Layout bkb: пары (box [1,64,Gh,Gw], cls [1,Nc,Gh,Gw]) × 3 ветки.
+    /// Layout YoloBranches: пары (box [1,64,Gh,Gw], cls [1,Nc,Gh,Gw]) × 3 ветки.
     /// Порт yolov8_utils.py (dfl/box_process/post_process).
     fn decode_branches(
         &self,
@@ -460,7 +460,7 @@ mod tests {
     fn layout_detection() {
         let single = vec![vec![1, 84, 8400]];
         assert_eq!(detect_layout(&single), Some(OutputLayout::SingleHead));
-        let bkb = vec![
+        let branches = vec![
             vec![1, 64, 80, 80],
             vec![1, 5, 80, 80],
             vec![1, 64, 40, 40],
@@ -468,7 +468,7 @@ mod tests {
             vec![1, 64, 20, 20],
             vec![1, 5, 20, 20],
         ];
-        assert_eq!(detect_layout(&bkb), Some(OutputLayout::BkbBranches));
+        assert_eq!(detect_layout(&branches), Some(OutputLayout::YoloBranches));
     }
 
     #[test]

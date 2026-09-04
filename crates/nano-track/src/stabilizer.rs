@@ -1,4 +1,4 @@
-//! Стабилизатор бокса — порт filter.Stabilizer из bkb (test_nano_cpu/filter.py).
+//! Стабилизатор бокса — порт filter.Stabilizer (test_nano_cpu/filter.py предшественника).
 //! Метод: скользящее среднее с гейтом допустимого отклонения.
 
 #[derive(Debug, Clone)]

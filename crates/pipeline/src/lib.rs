@@ -4,8 +4,8 @@
 //! - детектор (YOLOv8 на NPU) — точный, но редкий (раз в N кадров);
 //! - трекер (NanoTrack на CPU) — быстрый, каждый кадр, но дрейфует.
 //!
-//! Паттерн handoff «детекция → трекер» унаследован от bkb (exchange_tracker),
-//! топология «детектор → трекер» — от Autotargeting (at/detections → at/tracks).
+//! Паттерн handoff «детекция → трекер» (exchange_tracker),
+//! топология «детектор → трекер» — классическая pub/sub.
 
 use common::{BBox, Detection};
 use nano_track::{NanoTracker, Stabilizer};
@@ -295,7 +295,7 @@ impl HybridTracker {
         }
 
         let mut b = bbox;
-        // Проверка краёв кадра (порт _edges_frame из bkb): цель у края — потеря.
+        // Проверка краёв кадра (порт _edges_frame): цель у края — потеря.
         let margin = 2.0;
         if b.x < margin || b.y < margin || b.x2() > frame.w as f32 - margin || b.y2() > frame.h as f32 - margin
         {

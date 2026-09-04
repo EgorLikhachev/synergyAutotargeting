@@ -654,7 +654,7 @@ impl Runner {
                     };
                     if decoder.is_single_head() {
                         tracing::warn!(
-                            "SingleHead-модель: int8 даёт conf=0.5 артефакт (ADR-014); используйте 9-веточные модели (bkb)"
+                            "SingleHead-модель: int8 даёт conf=0.5 артефакт (ADR-014); используйте 9-веточные модели"
                         );
                     }
                     tracing::info!(
@@ -732,7 +732,7 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
     ) -> Result<bool> {
         let mut last_det_conf = 0.0f32;
         // Демо-режим: синтетическая детекция в центре кадра — проверка
-        // трекинга/гибрида на реальных кадрах (модель bkb видит только свой
+        // трекинга/гибрида на реальных кадрах (модель видит только свой
         // целевой класс, которого в лабораторной сцене нет).
         if self.demo_detect && hybrid.wants_detection(seq) && !hybrid.detect_inflight {
             let size = w.min(h) as f32 * 0.25;

@@ -1,12 +1,12 @@
 //! MSP v1 (Betaflight/INAV) — кодек фреймов для управления подвесом/полётом.
-//! Порт wire-формата bkb `utils/uart_translator.py` (фаза D, ADR-012):
+//! Порт wire-формата MSP (фаза D, ADR-012):
 //!
 //! `$M<` + `<len:u8>` + `<cmd:u8>` + `<payload LE>` + `<crc:u8>`,
 //! crc = len ^ cmd ^ все байты payload (XOR).
 //!
 //! Основное сообщение — SET_RAW_RC (200): 16 RC-каналов, u16 LE, 1000..2000 мкс.
 
-/// MSP_SET_RAW_RC (bkb: главный канал управления).
+/// MSP_SET_RAW_RC (главный канал управления).
 pub const MSP_SET_RAW_RC: u8 = 200;
 /// MSP_RAW_GPS (запрос телеметрии GPS у полётника).
 pub const MSP_RAW_GPS: u8 = 106;
@@ -45,9 +45,9 @@ pub fn set_raw_rc(ch: &[u16; 16]) -> Vec<u8> {
     frame(MSP_SET_RAW_RC, &payload)
 }
 
-/// MSP2_SET_ARMING (0x0323) — дословный порт `arm_packet` bkb:
+/// MSP2_SET_ARMING (0x0323) — дословный порт `arm_packet` предшественника:
 /// `$M< 03 23 03 <01|00> crc`, crc = XOR всех байт фрейма (включая заголовок
-/// и длину — особенность bkb, отличается от v1-правила).
+/// и длину — особенность референсной реализации, отличается от v1-правила).
 pub fn set_arming(arm: bool) -> Vec<u8> {
     let mut out = vec![0x24, 0x4D, 0x3C, 0x03, 0x23, 0x03, u8::from(arm)];
     let crc = out.iter().fold(0u8, |a, &b| a ^ b);
@@ -86,7 +86,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn crc_matches_bkb_semantics() {
+    fn crc_matches_msp_reference() {
         // crc = len ^ cmd ^ payload...
         let payload = [1u8, 2, 3];
         assert_eq!(crc8(3, 200, &payload), 3 ^ 200 ^ 1 ^ 2 ^ 3);

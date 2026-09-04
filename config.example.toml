@@ -61,15 +61,15 @@ record = ""                # запись стрима в M-JPEG файл (пу�
 
 [commander]
 enabled = false            # контур наведения (фаза D)
-device = "/dev/ttyS6"      # UART полётника (bkb); нет устройства → noop+WARN
+device = "/dev/ttyS7"      # UART полётника (UART7, пины 22/33 — docs/wiring_gep_f405.md); нет устройства → noop+WARN
 baud = 115200
-rate_hz = 30               # частота RC-кадров (как bkb)
+rate_hz = 30               # частота RC-кадров
 kp = 2.0                   # усиления осей (X=Y на старте)
 ki = 0.0
 kd = 0.0
 deadband_px = 6.0          # мёртвая зона
 slew_us = 8.0              # лимит шага, мкс/тик
-swap_axes = false          # камера повёрнута на 90° (как в bkb)
+swap_axes = false          # камера повёрнута на 90°
 reverse_x = false
 reverse_y = false
 throttle_us = 1310         # ch3

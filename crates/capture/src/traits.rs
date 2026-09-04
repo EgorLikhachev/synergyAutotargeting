@@ -1,4 +1,4 @@
-//! Трейт источника видео (порт из Autotargeting).
+//! Трейт источника видео.
 
 use async_trait::async_trait;
 use common::Frame;

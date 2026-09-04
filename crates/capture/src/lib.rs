@@ -1,8 +1,8 @@
-//! Захват видео — V4L2 direct ioctl (порт из Autotargeting, обкатан на Arducam)
+//! Захват видео — V4L2 direct ioctl (обкатан на Arducam и PS Eye)
 //! + конверсия форматов (MJPEG/YUYV/NV12 → RGB24).
 //!
 //! ## Происхождение
-//! - `v4l2_direct.rs` — дословный перенос из Autotargeting `crates/video-capture`
+//! - `v4l2_direct.rs` — дословный перенос из проекта-предшественника (`video-capture`)
 //!   (ADR D-11: путь через `v4l`-crate давал 21 FPS, прямой ioctl — 90-100 FPS).
 //! - `convert.rs` — дословный перенос оттуда же (jpeg-decoder, pure Rust).
 

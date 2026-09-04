@@ -38,7 +38,7 @@ impl Default for AppConfig {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct DetectorConfig {
-    /// Путь к .rknn модели (bkb model_5_dynamic_rk3588.rknn).
+    /// Путь к .rknn модели (model_5_dynamic_rk3588.rknn).
     pub model_path: String,
     /// Вход модели (для letterbox и динамических форм).
     pub input_size: u32,
@@ -187,10 +187,10 @@ impl Default for StreamConfig {
 #[serde(default)]
 pub struct CommanderConfig {
     pub enabled: bool,
-    /// UART-устройство исполнителя (bkb: /dev/ttyS6).
+    /// UART-устройство исполнителя (/dev/ttyS7 — UART7, пины 22/33, см. docs/wiring_gep_f405.md).
     pub device: String,
     pub baud: u32,
-    /// Частота отправки RC, Гц (bkb: 30).
+    /// Частота отправки RC, Гц (30).
     pub rate_hz: u32,
     /// Усиления осей (одинаковы для X/Y на старте).
     pub kp: f32,
@@ -200,7 +200,7 @@ pub struct CommanderConfig {
     pub deadband_px: f32,
     /// Slew-лимит, мкс/тик.
     pub slew_us: f32,
-    /// Камера повёрнута на 90° — свап осей (bkb).
+    /// Камера повёрнута на 90° — свап осей.
     pub swap_axes: bool,
     pub reverse_x: bool,
     pub reverse_y: bool,

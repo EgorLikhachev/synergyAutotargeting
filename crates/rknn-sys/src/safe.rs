@@ -85,7 +85,7 @@ impl RknnModel {
         }
 
         // Ядро задаётся явно: на драйвере 2.3.0 AUTO-планировка наблюдалась
-        // segfault-ами (перенос из rknn-bridge Autotargeting).
+        // segfault-ами (перенос из rknn-bridge).
         let ret = unsafe { rknn_set_core_mask(ctx, core) };
         if ret < 0 {
             tracing::warn!(code = ret, "rknn_set_core_mask failed, продолжаем");
@@ -127,11 +127,11 @@ impl RknnModel {
             "вход модели до установки формы"
         );
         // Всегда пробуем установить форму: динамические модели (в т.ч. с
-        // дефолтами вроде [1,1088,1088,3] у bkb) требуют её явно, статические
+        // динамическими входами вроде [1,1088,1088,3]) требуют её явно, статические
         // вернут ошибку — игнорируем (их форма уже зашита).
         if attr.n_dims == 4 {
             // Layout по fmt: NHWC → [N,H,W,C] (H,W — dims[1],dims[2]),
-            // NCHW → [N,C,H,W] (H,W — dims[2],dims[3]). Реальная модель bkb
+            // NCHW → [N,C,H,W] (H,W — dims[2],dims[3]). Полевая модель
             // отдаёт NHWC с формами [1,1088,1088,3] / [1,640,640,3].
             if attr.fmt == RKNN_TENSOR_NHWC {
                 attr.dims[1] = h;
