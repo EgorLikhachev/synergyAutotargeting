@@ -25,3 +25,8 @@ synergy_cross
 synergy_new
 bench100.toml
 coco.toml
+
+# GPL-исходники драйвера PS Eye (качаются отдельно, см. pseye/README.md)
+pseye/*.c
+pseye/*.h
+pseye/*.ko
