@@ -37,6 +37,8 @@ struct OperatorApp {
     /// Экранная geom видео-панели для трансформа кликов.
     video_rect: Option<Rect>,
     arm_confirm: bool,
+    /// Когда включено подтверждение АРМ (автосброс через 4 с).
+    arm_confirm_at: Option<std::time::Instant>,
     lock_flash_ms: Option<std::time::Instant>,
     ui_fps: f32,
     ui_fps_acc: (std::time::Instant, u32),
@@ -56,6 +58,7 @@ impl OperatorApp {
             tex_version: 0,
             video_rect: None,
             arm_confirm: false,
+            arm_confirm_at: None,
             lock_flash_ms: None,
             ui_fps: 0.0,
             ui_fps_acc: (std::time::Instant::now(), 0),
@@ -166,11 +169,24 @@ impl eframe::App for OperatorApp {
             ui.add_space(4.0);
             // кнопки
             ui.horizontal(|ui| {
-                let hint = ui.button("ℹ Двойной клик по видео = ЗАХВАТ ЦЕЛИ");
-                let _ = hint;
+                // Состояние наведения — крупно и однозначно.
                 let armed = status.as_ref().map(|s| s.armed).unwrap_or(false);
+                if armed {
+                    ui.label(
+                        egui::RichText::new("● НАВЕДЕНИЕ РАЗРЕШЕНО")
+                            .size(14.0)
+                            .strong()
+                            .color(Color32::from_rgb(230, 60, 60)),
+                    );
+                } else {
+                    ui.label(
+                        egui::RichText::new("○ наведение запрещено")
+                            .size(14.0)
+                            .color(Color32::from_rgb(120, 160, 120)),
+                    );
+                }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    // СТОП — большая красная
+                    // СТОП — большая красная (всегда доступна)
                     let stop_btn = egui::Button::new(
                         egui::RichText::new("СТОП").size(20.0).strong(),
                     )
@@ -179,38 +195,63 @@ impl eframe::App for OperatorApp {
                     if ui.add(stop_btn).clicked() {
                         self.net.send(UiCommand::Stop);
                         self.arm_confirm = false;
+                        self.arm_confirm_at = None;
                     }
-                    // АРМ — с подтверждением
+                    // АРМ — двухшаговое подтверждение (безопасность):
+                    // первый клик только «заряжает» кнопку, второй включает.
                     if armed {
                         let off = egui::Button::new(
-                            egui::RichText::new("● АРМ ВКЛ").size(18.0).strong(),
+                            egui::RichText::new("● АРМ ВКЛ — выключить").size(18.0).strong(),
                         )
                         .fill(Color32::from_rgb(190, 40, 40))
-                        .min_size(egui::vec2(130.0, 40.0));
+                        .min_size(egui::vec2(170.0, 40.0));
                         if ui.add(off).clicked() {
                             self.net.send(UiCommand::Arm { on: false });
                         }
                     } else if self.arm_confirm {
                         let yes = egui::Button::new(
-                            egui::RichText::new("ТОЧНО АРМ?").size(18.0).strong(),
+                            egui::RichText::new("ТОЧНО → РАЗРЕШИТЬ").size(18.0).strong(),
                         )
                         .fill(Color32::from_rgb(120, 90, 20))
-                        .min_size(egui::vec2(130.0, 40.0));
+                        .min_size(egui::vec2(170.0, 40.0));
                         if ui.add(yes).clicked() {
                             self.net.send(UiCommand::Arm { on: true });
                             self.arm_confirm = false;
+                            self.arm_confirm_at = None;
                         }
                     } else {
                         let arm = egui::Button::new(
-                            egui::RichText::new("АРМ").size(18.0).strong(),
+                            egui::RichText::new("АРМ (2 клика)").size(18.0).strong(),
                         )
-                        .min_size(egui::vec2(130.0, 40.0));
+                        .min_size(egui::vec2(170.0, 40.0));
                         if ui.add(arm).clicked() {
                             self.arm_confirm = true;
+                            self.arm_confirm_at = Some(std::time::Instant::now());
                         }
                     }
                 });
             });
+            // Подсказка подтверждения (автосброс 4 с — не даём «заряженной»
+            // кнопке висеть бесконечно).
+            if self.arm_confirm {
+                let left = 4.0 - self
+                    .arm_confirm_at
+                    .map(|t| t.elapsed().as_secs_f32())
+                    .unwrap_or(4.0);
+                if left <= 0.0 {
+                    self.arm_confirm = false;
+                    self.arm_confirm_at = None;
+                } else {
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "⚠ нажмите «ТОЧНО → РАЗРЕШИТЬ» в течение {left:.1} с, \
+                             иначе подтверждение снимется"
+                        ))
+                        .size(13.0)
+                        .color(Color32::from_rgb(220, 180, 60)),
+                    );
+                }
+            }
             ui.add_space(6.0);
         });
 

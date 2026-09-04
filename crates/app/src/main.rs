@@ -1107,13 +1107,28 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
                 );
                 let frame_recv = Instant::now(); // e2e: до декодирования
                 let dec_t0 = Instant::now();
+                // Битый/рваный кадр (размер не сходится, обрыв стрима) —
+                // пропускаем с предупреждением: ронять пайплайн из-за
+                // одного кадра нельзя (зафиксировано на PS Eye 2026-09-04:
+                // выход процесса «Error: демозаик GRBG» на рваном буфере).
                 let rgb_frame: Frame = match frame.metadata.format {
-                    PixelFormat::Mjpeg => {
-                        decode_mjpeg_to_rgb(&frame).context("декодирование MJPEG")?
-                    }
+                    PixelFormat::Mjpeg => match decode_mjpeg_to_rgb(&frame) {
+                        Ok(f) => f,
+                        Err(e) => {
+                            tracing::warn!(seq, error = %e, "кадр MJPEG не декодировался — пропускаю");
+                            continue;
+                        }
+                    },
                     // PS Eye (ov534): raw Bayer GRBG → RGB24.
-                    PixelFormat::BayerGrbg => capture::convert::demosaic_grbg_to_rgb24(&frame)
-                        .context("демозаик GRBG")?,
+                    PixelFormat::BayerGrbg => {
+                        match capture::convert::demosaic_grbg_to_rgb24(&frame) {
+                            Ok(f) => f,
+                            Err(e) => {
+                                tracing::warn!(seq, error = %e, "демозаик GRBG не удался — пропускаю кадр");
+                                continue;
+                            }
+                        }
+                    }
                     _ => frame,
                 };
                 let dec_us = dec_t0.elapsed().as_micros() as u64;
