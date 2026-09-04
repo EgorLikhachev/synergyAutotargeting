@@ -2,7 +2,7 @@
 //! контрольного канала (:9010), команда — JSON-строки (ADR-016).
 
 use std::io::{BufRead, BufReader, Read, Write};
-use std::net::{TcpListener, TcpStream};
+use std::net::TcpListener;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -55,6 +55,7 @@ pub struct Status {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)] // поле 4 (score) приходит в строке статуса, но пока не отображается
 pub struct DetsEntry(
     pub f32,
     pub f32,
@@ -67,6 +68,9 @@ pub struct DetsEntry(
 pub struct VideoFrame {
     pub version: u64,
     pub rgba: Vec<u8>,
+    /// Фактический размер кадра (борт может прислать не 640×480).
+    pub w: usize,
+    pub h: usize,
 }
 
 /// Сводка активной/завершённой записи.
@@ -76,6 +80,8 @@ pub struct RecStats {
     pub bytes: u64,
     /// Кадры, не попавшие в запись (диск не успевал — канал полон).
     pub dropped: u64,
+    /// Ошибка записи (диск переполнен и т.п.) — запись останавливается.
+    pub error: Option<String>,
     pub started: Option<Instant>,
 }
 
@@ -83,10 +89,14 @@ pub struct RecStats {
 /// поток-писатель дописывает их в файл. Конкатенация JPEG — это ровно
 /// replay-формат борта (--replay) и обычный M-JPEG для VLC: без
 /// перекодирования, копия байтов стрима.
+///
+/// Долговечность: писатель флашит буфер раз в секунду; stop() ждёт
+/// завершения писателя (джойн), так что закрытие окна не теряет хвост.
 pub struct Recorder {
     tx: Mutex<Option<std::sync::mpsc::SyncSender<Vec<u8>>>>,
     path: Mutex<Option<PathBuf>>,
     stats: Arc<Mutex<RecStats>>,
+    writer: Mutex<Option<std::thread::JoinHandle<()>>>,
 }
 
 impl Recorder {
@@ -95,20 +105,16 @@ impl Recorder {
             tx: Mutex::new(None),
             path: Mutex::new(None),
             stats: Arc::new(Mutex::new(RecStats::default())),
+            writer: Mutex::new(None),
         }
     }
 
     pub fn is_recording(&self) -> bool {
-        self.tx.lock().unwrap().is_some()
+        self.tx.lock().unwrap_or_else(|e| e.into_inner()).is_some()
     }
 
     pub fn stats(&self) -> RecStats {
-        self.stats.lock().unwrap().clone()
-    }
-
-    /// Путь текущей/последней записи.
-    pub fn path(&self) -> Option<PathBuf> {
-        self.path.lock().unwrap().clone()
+        self.stats.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     /// Начать запись в файл `dir/synergy_ГГГГММДД_ЧЧММСС.mjpg`.
@@ -121,45 +127,70 @@ impl Recorder {
         let file = std::fs::File::create(&path).map_err(|e| format!("файл записи: {e}"))?;
         let (tx, rx) = std::sync::mpsc::sync_channel::<Vec<u8>>(240);
         let stats = self.stats.clone();
-        *stats.lock().unwrap() = RecStats { started: Some(Instant::now()), ..Default::default() };
-        let path2 = path.clone();
-        let _ = std::thread::Builder::new().name("rec-writer".into()).spawn(move || {
-            let mut w = std::io::BufWriter::with_capacity(4 * 1024 * 1024, file);
-            for frame in rx {
-                if w.write_all(&frame).is_err() {
-                    break;
+        *stats.lock().unwrap_or_else(|e| e.into_inner()) =
+            RecStats { started: Some(Instant::now()), ..Default::default() };
+        let handle = std::thread::Builder::new()
+            .name("rec-writer".into())
+            .spawn(move || {
+                let mut w = std::io::BufWriter::with_capacity(4 * 1024 * 1024, file);
+                loop {
+                    match rx.recv_timeout(Duration::from_secs(1)) {
+                        Ok(frame) => {
+                            if let Err(e) = w.write_all(&frame) {
+                                let mut s = stats.lock().unwrap_or_else(|e| e.into_inner());
+                                s.error = Some(format!("запись на диск: {e}"));
+                                break;
+                            }
+                            let mut s = stats.lock().unwrap_or_else(|e| e.into_inner());
+                            s.frames += 1;
+                            s.bytes += frame.len() as u64;
+                        }
+                        // таймаут: канал пуст ≥1 с — флашим, чтобы хвост
+                        // не копился в буфере (durability при закрытии окна)
+                        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                            let _ = w.flush();
+                        }
+                        // stop() разорвал канал — флаш и закрытие при drop
+                        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+                    }
                 }
-                let mut s = stats.lock().unwrap();
-                s.frames += 1;
-                s.bytes += frame.len() as u64;
-            }
-            // канал закрыт (stop) или ошибка записи — flush и закрытие при drop
-            let _ = w.flush();
-            let _ = path2;
-        });
-        *self.path.lock().unwrap() = Some(path.clone());
-        *self.tx.lock().unwrap() = Some(tx);
+                let _ = w.flush();
+            })
+            .map_err(|e| format!("поток записи: {e}"))?;
+        *self.path.lock().unwrap_or_else(|e| e.into_inner()) = Some(path.clone());
+        *self.writer.lock().unwrap_or_else(|e| e.into_inner()) = Some(handle);
+        *self.tx.lock().unwrap_or_else(|e| e.into_inner()) = Some(tx);
         Ok(path)
     }
 
-    /// Остановить запись, вернуть путь файла.
+    /// Остановить запись и дождаться, пока писатель флашнет файл
+    /// (буфер ≤4 МиБ — джойн занимает миллисекунды). Вернуть путь файла.
     pub fn stop(&self) -> Option<PathBuf> {
-        let tx = self.tx.lock().unwrap().take();
-        drop(tx); // разрывает канал → писатель флашит и закрывает файл
-        self.stats.lock().unwrap().started = None;
-        self.path.lock().unwrap().clone()
+        let tx = self.tx.lock().unwrap_or_else(|e| e.into_inner()).take();
+        drop(tx); // разрывает канал → писатель флашит и выходит
+        if let Some(h) = self.writer.lock().unwrap_or_else(|e| e.into_inner()).take() {
+            let _ = h.join();
+        }
+        self.stats.lock().unwrap_or_else(|e| e.into_inner()).started = None;
+        self.path.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     /// Вызывается из видео-потока на каждый принятый кадр.
     fn submit(&self, jpeg: &[u8]) {
-        let guard = self.tx.lock().unwrap();
+        let guard = self.tx.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(tx) = guard.as_ref() {
             match tx.try_send(jpeg.to_vec()) {
                 Ok(()) => {}
                 Err(std::sync::mpsc::TrySendError::Full(_)) => {
-                    self.stats.lock().unwrap().dropped += 1;
+                    self.stats.lock().unwrap_or_else(|e| e.into_inner()).dropped += 1;
                 }
-                Err(std::sync::mpsc::TrySendError::Disconnected(_)) => {}
+                // писатель умер (диск) — фиксируем ошибку, если он не успел
+                Err(std::sync::mpsc::TrySendError::Disconnected(_)) => {
+                    let mut s = self.stats.lock().unwrap_or_else(|e| e.into_inner());
+                    if s.error.is_none() {
+                        s.error = Some("поток записи остановился (диск?)".into());
+                    }
+                }
             }
         }
     }
@@ -219,6 +250,8 @@ pub struct NetState {
     video_connected: Arc<AtomicBool>,
     control_connected: Arc<AtomicBool>,
     status: Arc<Mutex<Option<Status>>>,
+    /// Когда пришёл последний статус (возраст данных для UI).
+    status_at: Arc<Mutex<Option<Instant>>>,
     cmd_tx: Arc<Mutex<Option<std::sync::mpsc::Sender<UiCommand>>>>,
     video_fps: Arc<Mutex<(Instant, u32, f32)>>, // (окно, кадры, fps)
     rec: Arc<Recorder>,
@@ -232,6 +265,7 @@ impl NetState {
             video_connected: Arc::new(AtomicBool::new(false)),
             control_connected: Arc::new(AtomicBool::new(false)),
             status: Arc::new(Mutex::new(None)),
+            status_at: Arc::new(Mutex::new(None)),
             cmd_tx: Arc::new(Mutex::new(None)),
             video_fps: Arc::new(Mutex::new((Instant::now(), 0, 0.0))),
             rec: Arc::new(Recorder::new()),
@@ -240,6 +274,7 @@ impl NetState {
         spawn_control_listener(
             s.control_connected.clone(),
             s.status.clone(),
+            s.status_at.clone(),
             s.cmd_tx.clone(),
         );
         s
@@ -251,11 +286,21 @@ impl NetState {
     }
 
     pub fn take_video_frame(&self) -> Option<VideoFrame> {
-        self.frame.lock().unwrap().take()
+        self.frame.lock().unwrap_or_else(|e| e.into_inner()).take()
     }
 
+    /// Последний статус; None после обрыва канала (данные недостоверны —
+    /// например, «НАВЕДЕНИЕ РАЗРЕШЕНО» не должно висеть над мёртвым каналом).
     pub fn status(&self) -> Option<Status> {
-        self.status.lock().unwrap().clone()
+        self.status.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    /// Возраст последнего статуса, с (для индикации «данные N с назад»).
+    pub fn status_age_secs(&self) -> Option<f32> {
+        self.status_at
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .map(|t| t.elapsed().as_secs_f32())
     }
 
     pub fn video_connected(&self) -> bool {
@@ -267,11 +312,11 @@ impl NetState {
     }
 
     pub fn video_fps(&self) -> f32 {
-        self.video_fps.lock().unwrap().2
+        self.video_fps.lock().unwrap_or_else(|e| e.into_inner()).2
     }
 
     pub fn send(&self, cmd: UiCommand) {
-        if let Some(tx) = self.cmd_tx.lock().unwrap().as_ref() {
+        if let Some(tx) = self.cmd_tx.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
             let _ = tx.send(cmd);
         }
     }
@@ -318,10 +363,11 @@ fn spawn_video_listener(
                     // перекодирования нет, файл = копия стрима
                     rec.submit(&jpeg);
                     match decode_rgba(&jpeg) {
-                        Some(rgba) => {
+                        Some((rgba, w, h)) => {
                             let v = version.fetch_add(1, Ordering::Relaxed) + 1;
-                            *slot.lock().unwrap() = Some(VideoFrame { version: v, rgba });
-                            let mut m = fps_meter.lock().unwrap();
+                            *slot.lock().unwrap_or_else(|e| e.into_inner()) =
+                                Some(VideoFrame { version: v, rgba, w, h });
+                            let mut m = fps_meter.lock().unwrap_or_else(|e| e.into_inner());
                             m.1 += 1;
                             if m.0.elapsed() >= Duration::from_millis(500) {
                                 m.2 = m.1 as f32 / m.0.elapsed().as_secs_f32();
@@ -348,6 +394,7 @@ fn spawn_video_listener(
 fn spawn_control_listener(
     connected: Arc<AtomicBool>,
     status_slot: Arc<Mutex<Option<Status>>>,
+    status_at: Arc<Mutex<Option<Instant>>>,
     cmd_slot: Arc<Mutex<Option<std::sync::mpsc::Sender<UiCommand>>>>,
 ) {
     let _ = std::thread::Builder::new().name("control".into()).spawn(move || {
@@ -374,9 +421,10 @@ fn spawn_control_listener(
             };
             let mut writer = stream;
             let (tx, rx) = std::sync::mpsc::channel::<UiCommand>();
-            *cmd_slot.lock().unwrap() = Some(tx);
+            *cmd_slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(tx);
             // поток чтения статусов
             let st = status_slot.clone();
+            let st_at = status_at.clone();
             let conn2 = connected.clone();
             let reader_handle = std::thread::spawn(move || {
                 let mut reader = BufReader::new(read_sock);
@@ -387,11 +435,17 @@ fn spawn_control_listener(
                         Ok(0) | Err(_) => break,
                         Ok(_) => {
                             if let Ok(s) = serde_json::from_str::<Status>(line.trim()) {
-                                *st.lock().unwrap() = Some(s);
+                                *st.lock().unwrap_or_else(|e| e.into_inner()) = Some(s);
+                                *st_at.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now());
                             }
                         }
                     }
                 }
+                // Обрыв канала: данные борта больше недостоверны (armed,
+                // режим) — чистим, чтобы UI не показывал замороженное
+                // состояние над мёртвым каналом.
+                *st.lock().unwrap_or_else(|e| e.into_inner()) = None;
+                *st_at.lock().unwrap_or_else(|e| e.into_inner()) = None;
                 conn2.store(false, Ordering::Relaxed);
                 eprintln!("[CONTROL] борт отключился");
             });
@@ -415,7 +469,7 @@ fn spawn_control_listener(
                 std::thread::sleep(Duration::from_millis(20));
             }
             let _ = reader_handle.join();
-            *cmd_slot.lock().unwrap() = None;
+            *cmd_slot.lock().unwrap_or_else(|e| e.into_inner()) = None;
             connected.store(false, Ordering::Relaxed);
         }
     });
@@ -433,20 +487,20 @@ fn find_jpeg(buf: &[u8]) -> Option<(usize, usize)> {
     Some((start, end_marker))
 }
 
-/// JPEG → RGBA (jpeg-decoder из workspace).
-fn decode_rgba(jpeg: &[u8]) -> Option<Vec<u8>> {
+/// JPEG → RGBA (jpeg-decoder из workspace). Возвращает (пиксели, w, h).
+fn decode_rgba(jpeg: &[u8]) -> Option<(Vec<u8>, usize, usize)> {
     let mut dec = jpeg_decoder::Decoder::new(jpeg);
     let pixels = dec.decode().ok()?;
     let info = dec.info()?;
     let (w, h) = (info.width as usize, info.height as usize);
     match info.pixel_format {
-        jpeg_decoder::PixelFormat::RGB24 => Some(rgb_to_rgba(&pixels, w * h)),
+        jpeg_decoder::PixelFormat::RGB24 => Some((rgb_to_rgba(&pixels, w * h), w, h)),
         jpeg_decoder::PixelFormat::L8 => {
             let mut rgba = Vec::with_capacity(w * h * 4);
             for &p in &pixels {
                 rgba.extend_from_slice(&[p, p, p, 255]);
             }
-            Some(rgba)
+            Some((rgba, w, h))
         }
         _ => None,
     }
