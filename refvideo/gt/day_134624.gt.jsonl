@@ -1,0 +1,720 @@
+{"frame": 0, "x": 360.6, "y": 250.3, "w": 10, "h": 8, "contrast": 29.0}
+{"frame": 1, "x": 339.6, "y": 265.1, "w": 12, "h": 10, "contrast": 27.0}
+{"frame": 2, "x": 298.2, "y": 288.1, "w": 13, "h": 10, "contrast": 29.0}
+{"frame": 3, "x": null}
+{"frame": 4, "x": 353.1, "y": 142.2, "w": 5, "h": 6, "contrast": 30.0}
+{"frame": 5, "x": 401.2, "y": 319.2, "w": 14, "h": 6, "contrast": 31.0}
+{"frame": 6, "x": 375.9, "y": 313.3, "w": 12, "h": 6, "contrast": 31.0}
+{"frame": 7, "x": null}
+{"frame": 8, "x": 274.2, "y": 126.4, "w": 5, "h": 8, "contrast": 30.0}
+{"frame": 9, "x": null}
+{"frame": 10, "x": null}
+{"frame": 11, "x": 338.0, "y": 336.3, "w": 9, "h": 5, "contrast": 34.0}
+{"frame": 12, "x": 326.9, "y": 336.3, "w": 9, "h": 5, "contrast": 34.0}
+{"frame": 13, "x": null}
+{"frame": 14, "x": 302.2, "y": 340.5, "w": 11, "h": 4, "contrast": 30.0}
+{"frame": 15, "x": 279.0, "y": 347.2, "w": 11, "h": 5, "contrast": 34.0}
+{"frame": 16, "x": null}
+{"frame": 17, "x": null}
+{"frame": 18, "x": 250.7, "y": 122.9, "w": 7, "h": 5, "contrast": 26.0}
+{"frame": 19, "x": 209.5, "y": 163.5, "w": 16, "h": 6, "contrast": 30.0}
+{"frame": 20, "x": 378.5, "y": 241.2, "w": 11, "h": 7, "contrast": 26.0}
+{"frame": 21, "x": 342.9, "y": 312.3, "w": 11, "h": 8, "contrast": 28.0}
+{"frame": 22, "x": 427.7, "y": 242.3, "w": 5, "h": 4, "contrast": 24.0}
+{"frame": 23, "x": 400.9, "y": 336.8, "w": 22, "h": 6, "contrast": 24.0}
+{"frame": 24, "x": 303.5, "y": 136.5, "w": 4, "h": 4, "contrast": 24.0}
+{"frame": 25, "x": 254.9, "y": 142.4, "w": 8, "h": 4, "contrast": 32.0}
+{"frame": 26, "x": 289.8, "y": 167.4, "w": 10, "h": 6, "contrast": 37.0}
+{"frame": 27, "x": 254.9, "y": 257.0, "w": 9, "h": 7, "contrast": 38.0}
+{"frame": 28, "x": null}
+{"frame": 29, "x": 353.9, "y": 122.4, "w": 5, "h": 3, "contrast": 64.0}
+{"frame": 30, "x": 398.1, "y": 163.1, "w": 5, "h": 3, "contrast": 63.0}
+{"frame": 31, "x": 385.5, "y": 211.0, "w": 4, "h": 3, "contrast": 63.0}
+{"frame": 32, "x": 373.9, "y": 259.8, "w": 5, "h": 4, "contrast": 65.0}
+{"frame": 33, "x": 364.6, "y": 311.8, "w": 4, "h": 4, "contrast": 71.0}
+{"frame": 34, "x": 429.7, "y": 136.1, "w": 9, "h": 5, "contrast": 61.0}
+{"frame": 35, "x": 312.7, "y": 167.0, "w": 4, "h": 3, "contrast": 64.0}
+{"frame": 36, "x": 242.0, "y": 179.0, "w": 3, "h": 3, "contrast": 65.0}
+{"frame": 37, "x": 234.9, "y": 241.1, "w": 3, "h": 3, "contrast": 63.0}
+{"frame": 38, "x": 228.3, "y": 309.4, "w": 3, "h": 4, "contrast": 63.0}
+{"frame": 39, "x": 307.4, "y": 195.2, "w": 4, "h": 20, "contrast": 94.0}
+{"frame": 40, "x": 306.1, "y": 260.4, "w": 4, "h": 20, "contrast": 84.0}
+{"frame": 41, "x": 435.4, "y": 350.9, "w": 3, "h": 18, "contrast": 101.0}
+{"frame": 42, "x": 236.6, "y": 324.3, "w": 4, "h": 3, "contrast": 49.0}
+{"frame": 43, "x": null}
+{"frame": 44, "x": 256.1, "y": 157.2, "w": 5, "h": 3, "contrast": 39.0}
+{"frame": 45, "x": null}
+{"frame": 46, "x": 261.1, "y": 243.9, "w": 5, "h": 3, "contrast": 39.0}
+{"frame": 47, "x": 265.1, "y": 278.1, "w": 5, "h": 3, "contrast": 46.0}
+{"frame": 48, "x": null}
+{"frame": 49, "x": null}
+{"frame": 50, "x": null}
+{"frame": 51, "x": null}
+{"frame": 52, "x": null}
+{"frame": 53, "x": null}
+{"frame": 54, "x": null}
+{"frame": 55, "x": null}
+{"frame": 56, "x": 298.2, "y": 354.9, "w": 5, "h": 3, "contrast": 55.0}
+{"frame": 57, "x": 296.4, "y": 350.1, "w": 4, "h": 3, "contrast": 60.0}
+{"frame": 58, "x": 294.3, "y": 345.2, "w": 5, "h": 3, "contrast": 67.0}
+{"frame": 59, "x": null}
+{"frame": 60, "x": 289.2, "y": 338.0, "w": 5, "h": 3, "contrast": 52.0}
+{"frame": 61, "x": 286.0, "y": 335.1, "w": 5, "h": 3, "contrast": 55.0}
+{"frame": 62, "x": 284.3, "y": 331.8, "w": 4, "h": 3, "contrast": 49.0}
+{"frame": 63, "x": 279.3, "y": 324.8, "w": 4, "h": 3, "contrast": 53.0}
+{"frame": 64, "x": null}
+{"frame": 65, "x": null}
+{"frame": 66, "x": 272.3, "y": 307.8, "w": 4, "h": 3, "contrast": 52.0}
+{"frame": 67, "x": 269.2, "y": 304.0, "w": 5, "h": 3, "contrast": 51.0}
+{"frame": 68, "x": 264.5, "y": 295.0, "w": 6, "h": 3, "contrast": 51.0}
+{"frame": 69, "x": null}
+{"frame": 70, "x": null}
+{"frame": 71, "x": null}
+{"frame": 72, "x": 266.4, "y": 272.1, "w": 5, "h": 3, "contrast": 61.0}
+{"frame": 73, "x": 266.8, "y": 266.9, "w": 5, "h": 3, "contrast": 55.0}
+{"frame": 74, "x": null}
+{"frame": 75, "x": 262.4, "y": 253.0, "w": 5, "h": 3, "contrast": 64.0}
+{"frame": 76, "x": 260.8, "y": 246.0, "w": 5, "h": 3, "contrast": 65.0}
+{"frame": 77, "x": 260.4, "y": 238.1, "w": 5, "h": 3, "contrast": 59.0}
+{"frame": 78, "x": 259.7, "y": 232.7, "w": 5, "h": 3, "contrast": 63.0}
+{"frame": 79, "x": null}
+{"frame": 80, "x": null}
+{"frame": 81, "x": 260.8, "y": 226.9, "w": 5, "h": 3, "contrast": 62.0}
+{"frame": 82, "x": null}
+{"frame": 83, "x": 264.0, "y": 225.9, "w": 5, "h": 3, "contrast": 66.0}
+{"frame": 84, "x": 264.7, "y": 224.7, "w": 5, "h": 3, "contrast": 74.0}
+{"frame": 85, "x": 266.0, "y": 223.1, "w": 5, "h": 3, "contrast": 79.0}
+{"frame": 86, "x": 267.3, "y": 221.3, "w": 5, "h": 3, "contrast": 85.0}
+{"frame": 87, "x": null}
+{"frame": 88, "x": 269.2, "y": 217.0, "w": 5, "h": 3, "contrast": 83.0}
+{"frame": 89, "x": null}
+{"frame": 90, "x": 274.7, "y": 216.3, "w": 6, "h": 3, "contrast": 89.0}
+{"frame": 91, "x": null}
+{"frame": 92, "x": null}
+{"frame": 93, "x": 279.0, "y": 217.1, "w": 5, "h": 3, "contrast": 90.0}
+{"frame": 94, "x": 279.2, "y": 217.0, "w": 5, "h": 3, "contrast": 92.0}
+{"frame": 95, "x": null}
+{"frame": 96, "x": null}
+{"frame": 97, "x": null}
+{"frame": 98, "x": 282.2, "y": 216.0, "w": 5, "h": 3, "contrast": 86.0}
+{"frame": 99, "x": null}
+{"frame": 100, "x": 282.0, "y": 214.9, "w": 5, "h": 3, "contrast": 86.0}
+{"frame": 101, "x": 282.1, "y": 212.8, "w": 5, "h": 3, "contrast": 91.0}
+{"frame": 102, "x": 282.2, "y": 210.0, "w": 5, "h": 3, "contrast": 92.0}
+{"frame": 103, "x": 282.3, "y": 207.3, "w": 5, "h": 3, "contrast": 98.0}
+{"frame": 104, "x": null}
+{"frame": 105, "x": null}
+{"frame": 106, "x": null}
+{"frame": 107, "x": 284.0, "y": 192.0, "w": 5, "h": 3, "contrast": 87.0}
+{"frame": 108, "x": 284.7, "y": 188.1, "w": 6, "h": 3, "contrast": 98.0}
+{"frame": 109, "x": 285.0, "y": 183.9, "w": 5, "h": 3, "contrast": 95.0}
+{"frame": 110, "x": 286.4, "y": 176.2, "w": 6, "h": 3, "contrast": 102.0}
+{"frame": 111, "x": 287.0, "y": 173.2, "w": 5, "h": 3, "contrast": 112.0}
+{"frame": 112, "x": null}
+{"frame": 113, "x": null}
+{"frame": 114, "x": 292.0, "y": 159.1, "w": 5, "h": 3, "contrast": 115.0}
+{"frame": 115, "x": 292.0, "y": 155.1, "w": 5, "h": 3, "contrast": 114.0}
+{"frame": 116, "x": null}
+{"frame": 117, "x": 292.1, "y": 145.3, "w": 5, "h": 3, "contrast": 110.0}
+{"frame": 118, "x": null}
+{"frame": 119, "x": 290.0, "y": 132.0, "w": 5, "h": 3, "contrast": 114.0}
+{"frame": 120, "x": 288.9, "y": 122.9, "w": 5, "h": 3, "contrast": 111.0}
+{"frame": 121, "x": null}
+{"frame": 122, "x": null}
+{"frame": 123, "x": null}
+{"frame": 124, "x": null}
+{"frame": 125, "x": null}
+{"frame": 126, "x": 332.1, "y": 326.7, "w": 5, "h": 4, "contrast": 54.0}
+{"frame": 127, "x": null}
+{"frame": 128, "x": null}
+{"frame": 129, "x": null}
+{"frame": 130, "x": null}
+{"frame": 131, "x": null}
+{"frame": 132, "x": null}
+{"frame": 133, "x": null}
+{"frame": 134, "x": null}
+{"frame": 135, "x": null}
+{"frame": 136, "x": null}
+{"frame": 137, "x": null}
+{"frame": 138, "x": null}
+{"frame": 139, "x": null}
+{"frame": 140, "x": null}
+{"frame": 141, "x": null}
+{"frame": 142, "x": null}
+{"frame": 143, "x": 317.0, "y": 165.4, "w": 7, "h": 3, "contrast": 135.0}
+{"frame": 144, "x": null}
+{"frame": 145, "x": 316.3, "y": 213.4, "w": 6, "h": 3, "contrast": 130.0}
+{"frame": 146, "x": 316.5, "y": 232.0, "w": 6, "h": 3, "contrast": 128.0}
+{"frame": 147, "x": 314.1, "y": 257.3, "w": 6, "h": 3, "contrast": 143.0}
+{"frame": 148, "x": 312.7, "y": 263.4, "w": 6, "h": 3, "contrast": 141.0}
+{"frame": 149, "x": 306.3, "y": 269.3, "w": 6, "h": 3, "contrast": 156.0}
+{"frame": 150, "x": 303.6, "y": 267.9, "w": 6, "h": 3, "contrast": 143.0}
+{"frame": 151, "x": null}
+{"frame": 152, "x": null}
+{"frame": 153, "x": 293.3, "y": 251.1, "w": 6, "h": 3, "contrast": 137.0}
+{"frame": 154, "x": 290.4, "y": 241.2, "w": 6, "h": 3, "contrast": 141.0}
+{"frame": 155, "x": 289.3, "y": 237.0, "w": 6, "h": 3, "contrast": 134.0}
+{"frame": 156, "x": 287.1, "y": 230.8, "w": 5, "h": 3, "contrast": 141.0}
+{"frame": 157, "x": 285.6, "y": 228.9, "w": 6, "h": 3, "contrast": 155.0}
+{"frame": 158, "x": null}
+{"frame": 159, "x": 283.5, "y": 232.1, "w": 6, "h": 3, "contrast": 135.0}
+{"frame": 160, "x": 285.6, "y": 245.0, "w": 6, "h": 3, "contrast": 131.0}
+{"frame": 161, "x": 286.3, "y": 256.3, "w": 5, "h": 3, "contrast": 135.0}
+{"frame": 162, "x": 289.2, "y": 291.0, "w": 7, "h": 3, "contrast": 129.0}
+{"frame": 163, "x": 291.2, "y": 313.1, "w": 7, "h": 3, "contrast": 126.0}
+{"frame": 164, "x": null}
+{"frame": 165, "x": null}
+{"frame": 166, "x": null}
+{"frame": 167, "x": null}
+{"frame": 168, "x": null}
+{"frame": 169, "x": null}
+{"frame": 170, "x": null}
+{"frame": 171, "x": null}
+{"frame": 172, "x": null}
+{"frame": 173, "x": null}
+{"frame": 174, "x": null}
+{"frame": 175, "x": null}
+{"frame": 176, "x": null}
+{"frame": 177, "x": null}
+{"frame": 178, "x": null}
+{"frame": 179, "x": null}
+{"frame": 180, "x": null}
+{"frame": 181, "x": null}
+{"frame": 182, "x": null}
+{"frame": 183, "x": null}
+{"frame": 184, "x": null}
+{"frame": 185, "x": 275.9, "y": 328.8, "w": 7, "h": 4, "contrast": 154.0}
+{"frame": 186, "x": 276.5, "y": 299.2, "w": 8, "h": 3, "contrast": 137.0}
+{"frame": 187, "x": 278.0, "y": 274.1, "w": 7, "h": 3, "contrast": 133.0}
+{"frame": 188, "x": 279.9, "y": 237.8, "w": 7, "h": 4, "contrast": 153.0}
+{"frame": 189, "x": 282.8, "y": 226.1, "w": 7, "h": 3, "contrast": 151.0}
+{"frame": 190, "x": 286.2, "y": 213.2, "w": 7, "h": 3, "contrast": 154.0}
+{"frame": 191, "x": 289.6, "y": 210.4, "w": 8, "h": 3, "contrast": 156.0}
+{"frame": 192, "x": 292.3, "y": 210.2, "w": 8, "h": 3, "contrast": 150.0}
+{"frame": 193, "x": 295.0, "y": 210.1, "w": 7, "h": 3, "contrast": 157.0}
+{"frame": 194, "x": 297.1, "y": 211.7, "w": 8, "h": 4, "contrast": 168.0}
+{"frame": 195, "x": 301.0, "y": 215.2, "w": 7, "h": 3, "contrast": 156.0}
+{"frame": 196, "x": 302.9, "y": 215.7, "w": 7, "h": 4, "contrast": 176.0}
+{"frame": 197, "x": 304.7, "y": 216.3, "w": 8, "h": 3, "contrast": 169.0}
+{"frame": 198, "x": 305.7, "y": 216.3, "w": 8, "h": 3, "contrast": 177.0}
+{"frame": 199, "x": 305.5, "y": 215.2, "w": 8, "h": 3, "contrast": 175.0}
+{"frame": 200, "x": 305.7, "y": 214.5, "w": 8, "h": 4, "contrast": 170.0}
+{"frame": 201, "x": 304.2, "y": 213.8, "w": 8, "h": 4, "contrast": 170.0}
+{"frame": 202, "x": 303.7, "y": 212.1, "w": 8, "h": 3, "contrast": 162.0}
+{"frame": 203, "x": 302.7, "y": 210.1, "w": 8, "h": 3, "contrast": 164.0}
+{"frame": 204, "x": 301.3, "y": 208.2, "w": 8, "h": 3, "contrast": 170.0}
+{"frame": 205, "x": 300.5, "y": 205.5, "w": 8, "h": 4, "contrast": 164.0}
+{"frame": 206, "x": 295.7, "y": 199.1, "w": 8, "h": 3, "contrast": 168.0}
+{"frame": 207, "x": 294.4, "y": 193.9, "w": 8, "h": 4, "contrast": 159.0}
+{"frame": 208, "x": 290.6, "y": 180.6, "w": 10, "h": 4, "contrast": 151.0}
+{"frame": 209, "x": 288.8, "y": 172.7, "w": 9, "h": 4, "contrast": 157.0}
+{"frame": 210, "x": 284.8, "y": 151.3, "w": 11, "h": 5, "contrast": 139.0}
+{"frame": 211, "x": 283.0, "y": 135.6, "w": 11, "h": 4, "contrast": 141.0}
+{"frame": 212, "x": null}
+{"frame": 213, "x": null}
+{"frame": 214, "x": null}
+{"frame": 215, "x": null}
+{"frame": 216, "x": null}
+{"frame": 217, "x": null}
+{"frame": 218, "x": null}
+{"frame": 219, "x": null}
+{"frame": 220, "x": null}
+{"frame": 221, "x": null}
+{"frame": 222, "x": null}
+{"frame": 223, "x": null}
+{"frame": 224, "x": null}
+{"frame": 225, "x": null}
+{"frame": 226, "x": null}
+{"frame": 227, "x": null}
+{"frame": 228, "x": null}
+{"frame": 229, "x": null}
+{"frame": 230, "x": null}
+{"frame": 231, "x": null}
+{"frame": 232, "x": null}
+{"frame": 233, "x": null}
+{"frame": 234, "x": 313.8, "y": 125.4, "w": 16, "h": 6, "contrast": 118.0}
+{"frame": 235, "x": 311.6, "y": 148.8, "w": 17, "h": 7, "contrast": 125.0}
+{"frame": 236, "x": 309.3, "y": 167.7, "w": 18, "h": 7, "contrast": 125.0}
+{"frame": 237, "x": 308.8, "y": 183.0, "w": 17, "h": 6, "contrast": 127.0}
+{"frame": 238, "x": 307.9, "y": 193.6, "w": 15, "h": 7, "contrast": 135.0}
+{"frame": 239, "x": 305.7, "y": 199.8, "w": 17, "h": 7, "contrast": 129.0}
+{"frame": 240, "x": 304.4, "y": 204.7, "w": 18, "h": 7, "contrast": 137.0}
+{"frame": 241, "x": 302.6, "y": 207.7, "w": 17, "h": 7, "contrast": 133.0}
+{"frame": 242, "x": 301.1, "y": 208.4, "w": 15, "h": 7, "contrast": 143.0}
+{"frame": 243, "x": 300.0, "y": 208.4, "w": 17, "h": 7, "contrast": 142.0}
+{"frame": 244, "x": 300.0, "y": 208.3, "w": 17, "h": 7, "contrast": 139.0}
+{"frame": 245, "x": 298.5, "y": 206.8, "w": 19, "h": 7, "contrast": 130.0}
+{"frame": 246, "x": 298.8, "y": 202.7, "w": 17, "h": 7, "contrast": 137.0}
+{"frame": 247, "x": 299.0, "y": 200.4, "w": 19, "h": 8, "contrast": 119.0}
+{"frame": 248, "x": 300.6, "y": 197.1, "w": 19, "h": 8, "contrast": 141.0}
+{"frame": 249, "x": 302.9, "y": 198.0, "w": 19, "h": 7, "contrast": 133.0}
+{"frame": 250, "x": 308.2, "y": 202.8, "w": 20, "h": 8, "contrast": 132.0}
+{"frame": 251, "x": 312.7, "y": 206.7, "w": 19, "h": 8, "contrast": 128.0}
+{"frame": 252, "x": 324.3, "y": 214.2, "w": 12, "h": 8, "contrast": 129.0}
+{"frame": 253, "x": 324.7, "y": 217.9, "w": 21, "h": 9, "contrast": 128.0}
+{"frame": 254, "x": 330.5, "y": 219.8, "w": 12, "h": 8, "contrast": 128.0}
+{"frame": 255, "x": 329.7, "y": 222.6, "w": 14, "h": 9, "contrast": 135.0}
+{"frame": 256, "x": 336.7, "y": 226.2, "w": 21, "h": 9, "contrast": 126.0}
+{"frame": 257, "x": 342.9, "y": 227.7, "w": 3, "h": 7, "contrast": 142.0}
+{"frame": 258, "x": 347.1, "y": 229.7, "w": 3, "h": 5, "contrast": 135.0}
+{"frame": 259, "x": 351.0, "y": 236.9, "w": 20, "h": 9, "contrast": 136.0}
+{"frame": 260, "x": 355.4, "y": 241.1, "w": 22, "h": 10, "contrast": 130.0}
+{"frame": 261, "x": 357.8, "y": 244.9, "w": 15, "h": 11, "contrast": 136.0}
+{"frame": 262, "x": 366.7, "y": 245.5, "w": 4, "h": 6, "contrast": 131.0}
+{"frame": 263, "x": 380.0, "y": 247.4, "w": 3, "h": 3, "contrast": 126.0}
+{"frame": 264, "x": 387.0, "y": 246.4, "w": 3, "h": 3, "contrast": 139.0}
+{"frame": 265, "x": 395.0, "y": 245.4, "w": 3, "h": 3, "contrast": 134.0}
+{"frame": 266, "x": 404.6, "y": 244.1, "w": 4, "h": 4, "contrast": 129.0}
+{"frame": 267, "x": 404.8, "y": 249.2, "w": 9, "h": 7, "contrast": 121.0}
+{"frame": 268, "x": 421.2, "y": 240.7, "w": 3, "h": 4, "contrast": 142.0}
+{"frame": 269, "x": null}
+{"frame": 270, "x": 435.2, "y": 247.9, "w": 11, "h": 8, "contrast": 125.0}
+{"frame": 271, "x": null}
+{"frame": 272, "x": null}
+{"frame": 273, "x": null}
+{"frame": 274, "x": null}
+{"frame": 275, "x": null}
+{"frame": 276, "x": null}
+{"frame": 277, "x": null}
+{"frame": 278, "x": null}
+{"frame": 279, "x": null}
+{"frame": 280, "x": null}
+{"frame": 281, "x": null}
+{"frame": 282, "x": null}
+{"frame": 283, "x": null}
+{"frame": 284, "x": null}
+{"frame": 285, "x": null}
+{"frame": 286, "x": null}
+{"frame": 287, "x": null}
+{"frame": 288, "x": null}
+{"frame": 289, "x": null}
+{"frame": 290, "x": null}
+{"frame": 291, "x": null}
+{"frame": 292, "x": null}
+{"frame": 293, "x": null}
+{"frame": 294, "x": null}
+{"frame": 295, "x": null}
+{"frame": 296, "x": null}
+{"frame": 297, "x": null}
+{"frame": 298, "x": null}
+{"frame": 299, "x": null}
+{"frame": 300, "x": null}
+{"frame": 301, "x": null}
+{"frame": 302, "x": null}
+{"frame": 303, "x": null}
+{"frame": 304, "x": null}
+{"frame": 305, "x": null}
+{"frame": 306, "x": null}
+{"frame": 307, "x": null}
+{"frame": 308, "x": null}
+{"frame": 309, "x": null}
+{"frame": 310, "x": null}
+{"frame": 311, "x": null}
+{"frame": 312, "x": null}
+{"frame": 313, "x": null}
+{"frame": 314, "x": null}
+{"frame": 315, "x": null}
+{"frame": 316, "x": null}
+{"frame": 317, "x": null}
+{"frame": 318, "x": null}
+{"frame": 319, "x": null}
+{"frame": 320, "x": null}
+{"frame": 321, "x": null}
+{"frame": 322, "x": null}
+{"frame": 323, "x": null}
+{"frame": 324, "x": null}
+{"frame": 325, "x": null}
+{"frame": 326, "x": null}
+{"frame": 327, "x": null}
+{"frame": 328, "x": null}
+{"frame": 329, "x": null}
+{"frame": 330, "x": null}
+{"frame": 331, "x": null}
+{"frame": 332, "x": null}
+{"frame": 333, "x": null}
+{"frame": 334, "x": null}
+{"frame": 335, "x": null}
+{"frame": 336, "x": null}
+{"frame": 337, "x": null}
+{"frame": 338, "x": null}
+{"frame": 339, "x": null}
+{"frame": 340, "x": null}
+{"frame": 341, "x": null}
+{"frame": 342, "x": null}
+{"frame": 343, "x": null}
+{"frame": 344, "x": null}
+{"frame": 345, "x": null}
+{"frame": 346, "x": null}
+{"frame": 347, "x": null}
+{"frame": 348, "x": null}
+{"frame": 349, "x": null}
+{"frame": 350, "x": null}
+{"frame": 351, "x": null}
+{"frame": 352, "x": null}
+{"frame": 353, "x": null}
+{"frame": 354, "x": null}
+{"frame": 355, "x": null}
+{"frame": 356, "x": null}
+{"frame": 357, "x": 300.8, "y": 121.4, "w": 6, "h": 4, "contrast": 128.0}
+{"frame": 358, "x": 307.7, "y": 125.1, "w": 6, "h": 5, "contrast": 136.0}
+{"frame": 359, "x": 316.3, "y": 126.9, "w": 6, "h": 5, "contrast": 111.0}
+{"frame": 360, "x": 335.8, "y": 128.5, "w": 5, "h": 4, "contrast": 126.0}
+{"frame": 361, "x": 346.1, "y": 131.2, "w": 6, "h": 5, "contrast": 119.0}
+{"frame": 362, "x": 365.7, "y": 136.3, "w": 5, "h": 5, "contrast": 133.0}
+{"frame": 363, "x": 372.5, "y": 140.8, "w": 6, "h": 6, "contrast": 121.0}
+{"frame": 364, "x": 388.4, "y": 147.9, "w": 6, "h": 6, "contrast": 123.0}
+{"frame": 365, "x": 394.0, "y": 149.7, "w": 5, "h": 6, "contrast": 130.0}
+{"frame": 366, "x": 400.0, "y": 150.6, "w": 9, "h": 8, "contrast": 112.0}
+{"frame": 367, "x": 404.5, "y": 152.9, "w": 6, "h": 5, "contrast": 117.0}
+{"frame": 368, "x": 409.5, "y": 153.8, "w": 6, "h": 5, "contrast": 120.0}
+{"frame": 369, "x": 413.9, "y": 155.9, "w": 5, "h": 5, "contrast": 115.0}
+{"frame": 370, "x": 416.8, "y": 158.0, "w": 6, "h": 8, "contrast": 120.0}
+{"frame": 371, "x": 417.8, "y": 162.2, "w": 5, "h": 5, "contrast": 121.0}
+{"frame": 372, "x": 416.0, "y": 165.2, "w": 5, "h": 5, "contrast": 110.0}
+{"frame": 373, "x": 414.1, "y": 167.1, "w": 6, "h": 5, "contrast": 107.0}
+{"frame": 374, "x": 410.5, "y": 169.4, "w": 6, "h": 4, "contrast": 108.0}
+{"frame": 375, "x": 406.4, "y": 174.1, "w": 6, "h": 5, "contrast": 114.0}
+{"frame": 376, "x": 400.4, "y": 180.4, "w": 4, "h": 5, "contrast": 106.0}
+{"frame": 377, "x": 391.9, "y": 187.4, "w": 5, "h": 5, "contrast": 105.0}
+{"frame": 378, "x": 384.3, "y": 192.3, "w": 4, "h": 5, "contrast": 114.0}
+{"frame": 379, "x": 376.8, "y": 194.8, "w": 5, "h": 4, "contrast": 105.0}
+{"frame": 380, "x": 370.4, "y": 195.1, "w": 6, "h": 5, "contrast": 102.0}
+{"frame": 381, "x": 365.0, "y": 192.6, "w": 5, "h": 4, "contrast": 100.0}
+{"frame": 382, "x": 360.6, "y": 187.1, "w": 5, "h": 5, "contrast": 92.0}
+{"frame": 383, "x": 356.3, "y": 178.7, "w": 4, "h": 4, "contrast": 91.0}
+{"frame": 384, "x": 355.9, "y": 166.4, "w": 4, "h": 4, "contrast": 97.0}
+{"frame": 385, "x": 357.3, "y": 149.1, "w": 4, "h": 5, "contrast": 101.0}
+{"frame": 386, "x": 362.4, "y": 128.9, "w": 4, "h": 4, "contrast": 99.0}
+{"frame": 387, "x": null}
+{"frame": 388, "x": null}
+{"frame": 389, "x": null}
+{"frame": 390, "x": null}
+{"frame": 391, "x": null}
+{"frame": 392, "x": null}
+{"frame": 393, "x": null}
+{"frame": 394, "x": null}
+{"frame": 395, "x": null}
+{"frame": 396, "x": null}
+{"frame": 397, "x": null}
+{"frame": 398, "x": null}
+{"frame": 399, "x": null}
+{"frame": 400, "x": null}
+{"frame": 401, "x": null}
+{"frame": 402, "x": null}
+{"frame": 403, "x": null}
+{"frame": 404, "x": null}
+{"frame": 405, "x": null}
+{"frame": 406, "x": null}
+{"frame": 407, "x": null}
+{"frame": 408, "x": null}
+{"frame": 409, "x": null}
+{"frame": 410, "x": null}
+{"frame": 411, "x": null}
+{"frame": 412, "x": null}
+{"frame": 413, "x": null}
+{"frame": 414, "x": null}
+{"frame": 415, "x": null}
+{"frame": 416, "x": null}
+{"frame": 417, "x": null}
+{"frame": 418, "x": null}
+{"frame": 419, "x": null}
+{"frame": 420, "x": null}
+{"frame": 421, "x": null}
+{"frame": 422, "x": null}
+{"frame": 423, "x": null}
+{"frame": 424, "x": null}
+{"frame": 425, "x": null}
+{"frame": 426, "x": null}
+{"frame": 427, "x": null}
+{"frame": 428, "x": null}
+{"frame": 429, "x": null}
+{"frame": 430, "x": null}
+{"frame": 431, "x": null}
+{"frame": 432, "x": null}
+{"frame": 433, "x": null}
+{"frame": 434, "x": null}
+{"frame": 435, "x": null}
+{"frame": 436, "x": null}
+{"frame": 437, "x": null}
+{"frame": 438, "x": null}
+{"frame": 439, "x": null}
+{"frame": 440, "x": null}
+{"frame": 441, "x": null}
+{"frame": 442, "x": null}
+{"frame": 443, "x": null}
+{"frame": 444, "x": null}
+{"frame": 445, "x": null}
+{"frame": 446, "x": null}
+{"frame": 447, "x": null}
+{"frame": 448, "x": null}
+{"frame": 449, "x": null}
+{"frame": 450, "x": null}
+{"frame": 451, "x": null}
+{"frame": 452, "x": null}
+{"frame": 453, "x": null}
+{"frame": 454, "x": null}
+{"frame": 455, "x": 378.6, "y": 358.2, "w": 4, "h": 3, "contrast": 86.0}
+{"frame": 456, "x": 382.7, "y": 358.2, "w": 9, "h": 4, "contrast": 93.0}
+{"frame": 457, "x": 387.6, "y": 357.6, "w": 9, "h": 5, "contrast": 108.0}
+{"frame": 458, "x": 392.8, "y": 355.4, "w": 12, "h": 7, "contrast": 106.0}
+{"frame": 459, "x": 400.2, "y": 351.2, "w": 14, "h": 7, "contrast": 118.0}
+{"frame": 460, "x": 406.1, "y": 346.5, "w": 13, "h": 7, "contrast": 132.0}
+{"frame": 461, "x": 412.0, "y": 342.3, "w": 13, "h": 6, "contrast": 132.0}
+{"frame": 462, "x": 420.4, "y": 340.2, "w": 15, "h": 6, "contrast": 127.0}
+{"frame": 463, "x": 432.3, "y": 335.3, "w": 9, "h": 5, "contrast": 127.0}
+{"frame": 464, "x": 436.7, "y": 331.5, "w": 8, "h": 6, "contrast": 114.0}
+{"frame": 465, "x": null}
+{"frame": 466, "x": null}
+{"frame": 467, "x": null}
+{"frame": 468, "x": null}
+{"frame": 469, "x": null}
+{"frame": 470, "x": null}
+{"frame": 471, "x": null}
+{"frame": 472, "x": null}
+{"frame": 473, "x": 436.4, "y": 329.8, "w": 6, "h": 3, "contrast": 129.0}
+{"frame": 474, "x": 416.1, "y": 347.1, "w": 12, "h": 4, "contrast": 128.0}
+{"frame": 475, "x": 404.5, "y": 353.9, "w": 10, "h": 4, "contrast": 135.0}
+{"frame": 476, "x": 397.2, "y": 355.9, "w": 9, "h": 4, "contrast": 132.0}
+{"frame": 477, "x": 387.8, "y": 355.9, "w": 11, "h": 4, "contrast": 124.0}
+{"frame": 478, "x": 382.9, "y": 356.9, "w": 11, "h": 4, "contrast": 127.0}
+{"frame": 479, "x": null}
+{"frame": 480, "x": null}
+{"frame": 481, "x": null}
+{"frame": 482, "x": null}
+{"frame": 483, "x": null}
+{"frame": 484, "x": null}
+{"frame": 485, "x": null}
+{"frame": 486, "x": null}
+{"frame": 487, "x": null}
+{"frame": 488, "x": null}
+{"frame": 489, "x": null}
+{"frame": 490, "x": null}
+{"frame": 491, "x": null}
+{"frame": 492, "x": null}
+{"frame": 493, "x": null}
+{"frame": 494, "x": 330.0, "y": 358.1, "w": 5, "h": 3, "contrast": 134.0}
+{"frame": 495, "x": null}
+{"frame": 496, "x": 346.9, "y": 343.9, "w": 5, "h": 3, "contrast": 117.0}
+{"frame": 497, "x": null}
+{"frame": 498, "x": 375.7, "y": 324.0, "w": 4, "h": 3, "contrast": 100.0}
+{"frame": 499, "x": null}
+{"frame": 500, "x": null}
+{"frame": 501, "x": null}
+{"frame": 502, "x": null}
+{"frame": 503, "x": null}
+{"frame": 504, "x": null}
+{"frame": 505, "x": null}
+{"frame": 506, "x": null}
+{"frame": 507, "x": null}
+{"frame": 508, "x": null}
+{"frame": 509, "x": null}
+{"frame": 510, "x": null}
+{"frame": 511, "x": null}
+{"frame": 512, "x": null}
+{"frame": 513, "x": null}
+{"frame": 514, "x": null}
+{"frame": 515, "x": null}
+{"frame": 516, "x": null}
+{"frame": 517, "x": null}
+{"frame": 518, "x": null}
+{"frame": 519, "x": null}
+{"frame": 520, "x": null}
+{"frame": 521, "x": null}
+{"frame": 522, "x": null}
+{"frame": 523, "x": null}
+{"frame": 524, "x": null}
+{"frame": 525, "x": null}
+{"frame": 526, "x": null}
+{"frame": 527, "x": null}
+{"frame": 528, "x": null}
+{"frame": 529, "x": null}
+{"frame": 530, "x": null}
+{"frame": 531, "x": null}
+{"frame": 532, "x": null}
+{"frame": 533, "x": null}
+{"frame": 534, "x": null}
+{"frame": 535, "x": null}
+{"frame": 536, "x": null}
+{"frame": 537, "x": null}
+{"frame": 538, "x": null}
+{"frame": 539, "x": null}
+{"frame": 540, "x": null}
+{"frame": 541, "x": 386.5, "y": 267.2, "w": 4, "h": 3, "contrast": 19.0}
+{"frame": 542, "x": 381.0, "y": 265.8, "w": 3, "h": 3, "contrast": 18.0}
+{"frame": 543, "x": null}
+{"frame": 544, "x": null}
+{"frame": 545, "x": null}
+{"frame": 546, "x": null}
+{"frame": 547, "x": null}
+{"frame": 548, "x": null}
+{"frame": 549, "x": null}
+{"frame": 550, "x": null}
+{"frame": 551, "x": null}
+{"frame": 552, "x": null}
+{"frame": 553, "x": 361.8, "y": 233.2, "w": 4, "h": 3, "contrast": 20.0}
+{"frame": 554, "x": null}
+{"frame": 555, "x": null}
+{"frame": 556, "x": null}
+{"frame": 557, "x": null}
+{"frame": 558, "x": null}
+{"frame": 559, "x": null}
+{"frame": 560, "x": null}
+{"frame": 561, "x": null}
+{"frame": 562, "x": null}
+{"frame": 563, "x": null}
+{"frame": 564, "x": null}
+{"frame": 565, "x": null}
+{"frame": 566, "x": null}
+{"frame": 567, "x": null}
+{"frame": 568, "x": null}
+{"frame": 569, "x": null}
+{"frame": 570, "x": null}
+{"frame": 571, "x": null}
+{"frame": 572, "x": null}
+{"frame": 573, "x": null}
+{"frame": 574, "x": null}
+{"frame": 575, "x": null}
+{"frame": 576, "x": null}
+{"frame": 577, "x": null}
+{"frame": 578, "x": null}
+{"frame": 579, "x": null}
+{"frame": 580, "x": null}
+{"frame": 581, "x": null}
+{"frame": 582, "x": null}
+{"frame": 583, "x": null}
+{"frame": 584, "x": null}
+{"frame": 585, "x": null}
+{"frame": 586, "x": null}
+{"frame": 587, "x": null}
+{"frame": 588, "x": null}
+{"frame": 589, "x": null}
+{"frame": 590, "x": null}
+{"frame": 591, "x": null}
+{"frame": 592, "x": null}
+{"frame": 593, "x": null}
+{"frame": 594, "x": null}
+{"frame": 595, "x": null}
+{"frame": 596, "x": null}
+{"frame": 597, "x": null}
+{"frame": 598, "x": null}
+{"frame": 599, "x": null}
+{"frame": 600, "x": null}
+{"frame": 601, "x": null}
+{"frame": 602, "x": null}
+{"frame": 603, "x": null}
+{"frame": 604, "x": null}
+{"frame": 605, "x": null}
+{"frame": 606, "x": null}
+{"frame": 607, "x": null}
+{"frame": 608, "x": null}
+{"frame": 609, "x": null}
+{"frame": 610, "x": null}
+{"frame": 611, "x": null}
+{"frame": 612, "x": null}
+{"frame": 613, "x": null}
+{"frame": 614, "x": null}
+{"frame": 615, "x": null}
+{"frame": 616, "x": null}
+{"frame": 617, "x": null}
+{"frame": 618, "x": null}
+{"frame": 619, "x": null}
+{"frame": 620, "x": null}
+{"frame": 621, "x": null}
+{"frame": 622, "x": null}
+{"frame": 623, "x": null}
+{"frame": 624, "x": null}
+{"frame": 625, "x": null}
+{"frame": 626, "x": null}
+{"frame": 627, "x": null}
+{"frame": 628, "x": null}
+{"frame": 629, "x": null}
+{"frame": 630, "x": null}
+{"frame": 631, "x": null}
+{"frame": 632, "x": null}
+{"frame": 633, "x": null}
+{"frame": 634, "x": null}
+{"frame": 635, "x": null}
+{"frame": 636, "x": null}
+{"frame": 637, "x": null}
+{"frame": 638, "x": null}
+{"frame": 639, "x": null}
+{"frame": 640, "x": null}
+{"frame": 641, "x": null}
+{"frame": 642, "x": null}
+{"frame": 643, "x": null}
+{"frame": 644, "x": null}
+{"frame": 645, "x": null}
+{"frame": 646, "x": null}
+{"frame": 647, "x": null}
+{"frame": 648, "x": null}
+{"frame": 649, "x": null}
+{"frame": 650, "x": null}
+{"frame": 651, "x": 392.8, "y": 332.1, "w": 7, "h": 3, "contrast": 70.0}
+{"frame": 652, "x": 386.9, "y": 310.5, "w": 7, "h": 4, "contrast": 64.0}
+{"frame": 653, "x": 382.2, "y": 286.6, "w": 8, "h": 5, "contrast": 65.0}
+{"frame": 654, "x": 304.8, "y": 258.0, "w": 23, "h": 5, "contrast": 63.0}
+{"frame": 655, "x": 301.9, "y": 230.0, "w": 26, "h": 6, "contrast": 65.0}
+{"frame": 656, "x": 301.7, "y": 202.0, "w": 23, "h": 6, "contrast": 69.0}
+{"frame": 657, "x": 377.2, "y": 175.0, "w": 5, "h": 3, "contrast": 70.0}
+{"frame": 658, "x": 296.5, "y": 144.6, "w": 26, "h": 4, "contrast": 70.0}
+{"frame": 659, "x": null}
+{"frame": 660, "x": null}
+{"frame": 661, "x": 326.7, "y": 298.0, "w": 3, "h": 6, "contrast": 58.0}
+{"frame": 662, "x": 325.0, "y": 284.1, "w": 4, "h": 6, "contrast": 64.0}
+{"frame": 663, "x": null}
+{"frame": 664, "x": null}
+{"frame": 665, "x": 321.8, "y": 283.9, "w": 3, "h": 5, "contrast": 67.0}
+{"frame": 666, "x": null}
+{"frame": 667, "x": null}
+{"frame": 668, "x": null}
+{"frame": 669, "x": 379.5, "y": 157.4, "w": 6, "h": 6, "contrast": 81.0}
+{"frame": 670, "x": 372.0, "y": 199.0, "w": 6, "h": 6, "contrast": 75.0}
+{"frame": 671, "x": 365.5, "y": 242.6, "w": 7, "h": 6, "contrast": 68.0}
+{"frame": 672, "x": null}
+{"frame": 673, "x": 302.4, "y": 331.8, "w": 9, "h": 4, "contrast": 58.0}
+{"frame": 674, "x": null}
+{"frame": 675, "x": null}
+{"frame": 676, "x": null}
+{"frame": 677, "x": null}
+{"frame": 678, "x": null}
+{"frame": 679, "x": null}
+{"frame": 680, "x": null}
+{"frame": 681, "x": null}
+{"frame": 682, "x": null}
+{"frame": 683, "x": null}
+{"frame": 684, "x": null}
+{"frame": 685, "x": null}
+{"frame": 686, "x": null}
+{"frame": 687, "x": null}
+{"frame": 688, "x": null}
+{"frame": 689, "x": null}
+{"frame": 690, "x": null}
+{"frame": 691, "x": null}
+{"frame": 692, "x": null}
+{"frame": 693, "x": null}
+{"frame": 694, "x": null}
+{"frame": 695, "x": null}
+{"frame": 696, "x": null}
+{"frame": 697, "x": null}
+{"frame": 698, "x": null}
+{"frame": 699, "x": null}
+{"frame": 700, "x": null}
+{"frame": 701, "x": null}
+{"frame": 702, "x": null}
+{"frame": 703, "x": null}
+{"frame": 704, "x": null}
+{"frame": 705, "x": null}
+{"frame": 706, "x": null}
+{"frame": 707, "x": null}
+{"frame": 708, "x": null}
+{"frame": 709, "x": null}
+{"frame": 710, "x": null}
+{"frame": 711, "x": 399.5, "y": 336.7, "w": 18, "h": 4, "contrast": 20.0}
+{"frame": 712, "x": null}
+{"frame": 713, "x": null}
+{"frame": 714, "x": null}
+{"frame": 715, "x": null}
+{"frame": 716, "x": 254.8, "y": 347.3, "w": 5, "h": 3, "contrast": 62.0}
+{"frame": 717, "x": 249.1, "y": 347.9, "w": 6, "h": 3, "contrast": 66.0}
+{"frame": 718, "x": 242.9, "y": 349.4, "w": 12, "h": 4, "contrast": 65.0}
+{"frame": 719, "x": 255.2, "y": 355.8, "w": 5, "h": 5, "contrast": 58.0}

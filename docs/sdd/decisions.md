@@ -66,7 +66,7 @@
 - **Статус:** принято (2026-09-01, по факту железа)
 - **Контекст:** ADR-002 предполагал zero-copy через DRM/GBM. На Radxa Debian 12
   (rknpu2 2.3.0) путь rknn_create_mem уходит в DRM_IOCTL_GEM_FLINK → EACCES →
-  PRIME_HANDLE_TO_FD → SIGSEGV внутри librknnrt (strace в docs/syn.strace.txt).
+  PRIME_HANDLE_TO_FD → SIGSEGV внутри librknnrt (strace-лог удалён из репо 2026-09-04: гигабайтные дампы не место в git).
 - **Решение:** copy-mode: rknn_inputs_set (UINT8/NHWC) → rknn_run →
   rknn_outputs_get(want_float=1). Замер: 35.7 мс на инференс 640×640 —
   копирование буферов в этих 35 мс незаметно (NPU-прогон доминирует).

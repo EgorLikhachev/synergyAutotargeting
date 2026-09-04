@@ -30,3 +30,8 @@ coco.toml
 pseye/*.c
 pseye/*.h
 pseye/*.ko
+
+# Ночные артефакты: поставка пульта и сырые данные прогонов
+dist/
+refvideo/runs_board/
+*.bin
