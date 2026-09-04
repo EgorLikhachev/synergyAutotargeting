@@ -1,36 +1,48 @@
-# Текущее состояние (обновлено: 2026-09-03, ночная смена)
+# Текущее состояние (обновлено: 2026-09-04, ночная смена)
 
 ## Что работает (доказано на железе)
-- Гибрид C: камера 640×480 **60 FPS** (режим 100 FPS даёт ~81), детекция
-  YOLOv8 NPU core0 (32 мс @640), трекинг NanoTrack NPU core1 (**6.2 мс**),
-  100% TRACKING на demo-цели, e2e кадр→бокс **10.6 мс** (медиана).
-- Стрим OSD: push (борт→зритель, `--stream-push`, tools/viewer.py) и
-  listen (через SSH-туннель, quirk ядра — см. ADR-009); `--record` в M-JPEG.
-- Коммандер (фаза D): MSP v1 SET_RAW_RC поверх UART (порт bkb),
-  PID+slew+deadband+свап осей, упреждение с фидфорвардом платформы;
-  валидирован на симуляторе ±30 px; ждёт UART-overlay + полётник.
-- Деплой: systemd synergy.service (автозапуск), кросс-компиляция WSL→aarch64
-  (tools/deploy.sh), bench-эталон (tools/bench.sh): 60.6 FPS / 6.13 мс.
+- Гибрид C: камера **PS Eye** `/dev/video-pseye` (udev-алиас VID:PID
+  1415:2000), GRBG 640×480 **60 FPS**; детекция YOLOv8 NPU core0 (32 мс @640),
+  трекинг NanoTrack NPU core1 (**6.2 мс**), e2e кадр→бокс **10.6 мс**.
+- Стрим OSD push (борт→UI, :9000) + канал управления (:9010, JSON-строки,
+  ADR-016): lock/arm/**stop/unlock**/ping; режимы TRACK/ACQUIRE/LOST/**IDLE**.
+- Операторский UI (crates/operator-ui, egui): видео+оверлеи, двойной клик =
+  захват, «× СНЯТЬ ЗАХВАТ», АРМ в 2 клика (4 с автосброс), СТОП,
+  **запись .mjpg** (durable: flush 1 с, стоп с джойном писателя),
+  горячие клавиши Esc/F/R, живой заголовок окна, «Папка записей».
+- Коммандер: MSP v1 SET_RAW_RC поверх UART, валидирован на симуляторе;
+  схема подключения полётника готова — docs/wiring_gep_f405.md
+  (GEP-F405-HD V3 → UART7 пины 22/33, /dev/ttyS7, overlay uart7-m2).
+- Устойчивость: камера недоступна → retry внутри процесса (не краш-луп;
+  инцидент 2026-09-04: 129 рестартов уронили сеть на часы), RestartSec=10.
+- Валидация на эталонных видео: 18 роликов через реальный NPU, скоринг
+  против GT — refvideo/RESULTS.md (трекер ×5-7 покрытия, медиана 7-15 px;
+  детектор 3-8% на целях 7×4 px; тепловизор разделяется по conf ≈0.45).
+- Деплой: tools/deploy.sh (WSL кросс-сборка + glibc-strip + unit-файл),
+  systemd synergy.service автозапуск.
 
 ## Ключевые файлы
-- crates/{common,capture,rknn-sys,detector,nano-track,pipeline,streaming,commander,app}
-- models/: .onnx (tract) + .rknn (int8 mmse; голова int8 из-за quirk fp16)
-- tools/: viewer.py, telemetry_report.py, convert_nanotrack.py, bench.sh,
-  deploy.sh, synergy.service
-- docs/: SDD-SPEC, ROADMAP, HARDWARE_TEST_RESULTS (все замеры), sdd/decisions (ADR-001..012)
+- crates/{common,capture,rknn-sys,detector,nano-track,pipeline,streaming,
+  commander,app,operator-ui} — 10 крейтов
+- models/: .onnx (tract) + .rknn (int8 mmse); refvideo/: GT + скрипты
+- tools/: viewer.py, deploy.sh, bench.sh, synergy.service
+- docs/: SDD-SPEC, ROADMAP, HARDWARE_TEST_RESULTS, safety_compliance,
+  wiring_gep_f405, sdd/decisions (ADR-001..018-a)
 
 ## Грабли (не повторять)
 - librknnrt 2.3.0: float-входы мульти-входовых графов — NHWC (ADR-011);
-  fp16 неточен на устройстве; opt=3 портит fusion. Zero-copy → SIGSEGV
-  в DRM (ADR-006, в бэклоге).
-- Быстрый re-open UVC → кадр 3×3 (гвард на старте).
-- Входящие TCP к user-портам при активном NPU не проходят (ADR-009).
-- Windows: `ssh -f` умирает; git pull на борту сломан (репо приватное) —
-  доставка через tools/deploy.sh (scp).
+  fp16 неточен; opt=3 портит fusion; zero-copy → SIGSEGV в DRM (ADR-006).
+- «Кадр 3×3» был багом НАШЕГО JPEG-энкодера (планарный буфер в
+  interleaved-кодер), камеры невиновны — ADR-018-a; защита оставлена.
+- Входящие TCP к user-портам при активном NPU не проходят (ADR-009);
+  при зависании ядра ARP ещё отвечает — не путать с «живым» бортом.
+- Windows: `ssh -f` умирает; git pull на борту сломан — доставка deploy.sh.
+- UVC/ov534 пере enumeration меняет /dev/videoN — только udev-алиас.
 
 ## Следующие шаги
-1. Фаза A — эталонное видео/объект: валидация реальной детекции
-   (tools/telemetry_report.py + detections.jsonl уже готовы).
-2. Фаза D — железо: UART-overlay (пин от заказчика), полётник, тюнинг kp/kd.
-3. Бэклог: H.264-стрим, zero-copy, мультицелевой режим, 9-веточная
-   COCO-модель (N3 отключён по ADR-014 — код сохранён).
+1. Физическая сборка FC↔ROCK 5A по wiring-доке: overlay uart7-m2,
+   конфиг commander на /dev/ttyS7, тест каналов MSP в Betaflight.
+2. Ретест UI заказчиком: АРМ/fail-safe/unlock/запись в поле.
+3. Безопасность (из safety_compliance): WatchdogSec+sd_notify, токен
+   канала, авто-разарм при длительном LOST.
+4. Детектор на мелких целях: дообучение/tile-инференс (refvideo/RESULTS R1-R2).

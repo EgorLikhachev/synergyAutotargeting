@@ -11,7 +11,7 @@ Autotargeting (docs/SDD-SPEC.md); журналы решений — в [sdd/deci
 
 ## 2. Требования
 
-- R1. Трекинг на каждом кадре (30 FPS камеры), задержка кадр→бокс < 50 мс.
+- R1. Трекинг на каждом кадре (камера PS Eye GRBG 60 FPS), задержка кадр→бокс < 50 мс.
 - R2. Детекция раз в N кадров (настраивается, базово 10 ≈ 3 Гц).
 - R3. Автоматический (ре)захват цели после потери.
 - R4. Headless-работа по SSH: OSD-снапшоты + JSONL-телеметрия.
@@ -22,13 +22,18 @@ Autotargeting (docs/SDD-SPEC.md); журналы решений — в [sdd/deci
 
 ```
 crates/
-  common     — Frame/BBox/Detection/PixelFormat (все зависят)
-  capture    — V4l2DirectSource (ioctl/MJPG) + конверсии (из Autotargeting)
-  rknn-sys   — FFI librknnrt: RknnModel::load/infer, zero-copy IO
-  detector   — letterbox + YoloDecoder (layout bkb-6 / at-1) + NMS
-  nano-track — NanoTracker (tract) + Stabilizer + KalmanFilter2D
-  pipeline   — HybridTracker: правила гибрида C
-  app        — CLI synergy: конфиг, потоки, OSD, телеметрия
+  common      — Frame/BBox/Detection/PixelFormat (все зависят)
+  capture     — V4l2DirectSource (ioctl/MJPG/GRBG) + конверсии
+  rknn-sys    — FFI librknnrt: RknnModel::load/infer (copy-mode, ADR-006)
+  detector    — letterbox + YoloDecoder (layout YoloBranches-6 / SingleHead-1) + NMS
+  nano-track  — NanoTracker (tract/RKNN, ADR-010) + Stabilizer + KalmanFilter2D
+  pipeline    — HybridTracker: правила гибрида C, режимы Tracking/
+                DetectAcquire/Lost/Idle (unlock)
+  streaming   — MJPEG сервер + push (борт→зритель, ADR-009)
+  commander   — закон наведения + MSP v1 по UART (ADR-012)
+  app         — CLI synergy: конфиг, потоки, OSD, телеметрия, replay
+  operator-ui — операторский egui-пульт (ADR-016): видео, захват,
+                АРМ/СТОП/снять захват, запись .mjpg
 ```
 
 ## 4. Контракты
@@ -39,8 +44,8 @@ crates/
 
 ### RknnModel (rknn-sys)
 - `load(path, Some((w,h)))` — rknn_init → NPU_CORE_0 → при динамической модели
-  `rknn_set_input_shapes` → форсировать вход UINT8/NHWC, выходы FLOAT32 →
-  выделить zero-copy память.
+  `rknn_set_input_shapes` → форсировать вход UINT8/NHWC, выходы FLOAT32.
+  Copy-mode: zero-copy через DRM в vendor-стеке падает SIGSEGV (ADR-006).
 - `infer(rgb) -> Vec<Vec<f32>>` — копия входа в NPU-буфер (с учётом w_stride),
   rknn_run, чтение float32-выходов.
 - Один экземпляр = один поток (не Sync).
@@ -60,13 +65,14 @@ seq) -> Vec<Detection>` в координатах исходного кадра.
 
 ## 5. Конфигурация
 
-TOML, см. config.example.toml: [camera] [detector] [tracker] [pipeline] [output].
+TOML, см. config.example.toml: [camera] [detector] [tracker] [pipeline]
+[output] [stream] [commander] [synthetic] [control] [logging].
 Все пороги выведены; ключевые: `detect_every_n`, `min_track_score` (0.30),
 `iou_confirm` (0.30), `lost_patience` (3).
 
 ## 6. Телеметрия
 
-JSONL, строка на кадр: ts_ms, frame_seq, mode(TRACK/ACQUIRE/LOST), x/y/w/h,
+JSONL, строка на кадр: ts_ms, frame_seq, mode(TRACK/ACQUIRE/LOST/IDLE), x/y/w/h,
 score, track_ms, det_ms, fps. Итог прогона — в stdout (средние значения,
 распределение режимов).
 
@@ -85,8 +91,6 @@ score, track_ms, det_ms, fps. Итог прогона — в stdout (средн�
 2. Производительность tract на aarch64 (M4): если update > 25 мс — включить
    оптимизацию графов/рассмотреть C++ фолбэк (ADR-003).
 3. Приоритизация целей (priority_classes) после выяснения классов.
-4. Quirk vendor-ядра: при инициализированном NPU новые входящие TCP к
-   пользовательским листенерам борта не проходят (sshd/systemd — проходит,
-   исходящие — проходят). Обход — SSH-туннель (ADR-009); корень не найден;
-   кандидаты на проверку: rknpu2 + conntrack/nft-модули, апгрейд ядра.
-5. Push-режим стрима (борт подключается к зрителю сам) как замена туннелю.
+4. ~~Quirk vendor-ядра: входящие TCP при активном NPU~~ — решён push-архитектурой
+   (ADR-009/016): все каналы исходящие от борта, UI — приёмник (:9000/:9010).
+5. ~~Push-режим как замена туннелю~~ — принят как основной (см. п.4).

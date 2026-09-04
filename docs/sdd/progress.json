@@ -1,7 +1,7 @@
 {
   "project": "synergyAutotargeting",
   "variant": "C — трекинг каждый кадр + детекция раз в N кадров",
-  "updated": "2026-09-01",
+  "updated": "2026-09-04",
   "stack": {
     "language": "rust",
     "tracker": "NanoTrack (порт OpenCV TrackerNano) на tract",
@@ -11,7 +11,7 @@
   "hardware": {
     "board": "Radxa ROCK 5A v1.2 (RK3588S, 16GB)",
     "os": "Radxa Debian 12, kernel 6.1.84-8-rk2410",
-    "camera": "Arducam USB (UVC, MJPG)",
+    "camera": "Sony PS Eye (ov534 1415:2000, GRBG 640x480@60, /dev/video-pseye udev-alias)",
     "npu_runtime": "librknnrt.so 2.3.0 (apt rknpu2-rk3588)"
   },
   "milestones": [
@@ -116,5 +116,12 @@
       "status": "done",
       "notes": "тесты+clippy+кросс-проверка на пуш"
     }
+  ],
+  "operator_ui": "egui-пульт (ADR-016): видео/захват/АРМ-2клика/СТОП/unlock(IDLE)/запись .mjpg; hotkeys Esc/F/R",
+  "extra": [
+    "safety-аудит: docs/safety_compliance.md (ГОСТ/НАСА, барьеры B1-B8)",
+    "валидация refvideo: 18 роликов NPU vs GT — refvideo/RESULTS.md",
+    "устойчивость: retry камеры в процессе + RestartSec=10 (инцидент 129 рестартов)",
+    "wiring полётника: docs/wiring_gep_f405.md (UART7 22/33, MSP)"
   ]
 }

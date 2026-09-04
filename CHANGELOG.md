@@ -6,6 +6,35 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- Stream 3x3 grid root cause: planar RGB buffer fed to interleaved JPEG
+  encoder — cameras were innocent (ADR-018-a).
+- Operator UI no longer exits on torn GRBG/MJPEG frames (skipped with warn).
+- Camera unavailability no longer crashes the service into a systemd
+  restart loop (129 restarts wedged the kernel/network for hours when
+  PS Eye enumerated as video0 while config pointed to video1): in-process
+  retry every 3 s + RestartSec=10 + stable udev alias /dev/video-pseye.
+- Operator UI: no panic on board frame size != 640x480; stale status
+  (incl. armed indicator) cleared on control-channel loss.
+- ARM button 2-step confirm with 4 s auto-reset and explicit state label.
+
+### Added
+- Sony PS Eye support: out-of-tree ov534/gspca driver build, GRBG Bayer
+  format + demosaic, 640x480@60 verified.
+- Operator UI: video recording to .mjpg (replay-compatible, durable
+  flush/stop), hotkeys Esc/F/R, live window title, unlock tracking button
+  (Mode::Idle), clickable recording path + open-folder.
+- Safety audit vs GOST/NASA principles (docs/safety_compliance.md).
+- Reference-video validation rig: 18 replays on real NPU scored vs GT
+  (refvideo/RESULTS.md); tracker multiplies coverage x5-7.
+- Flight controller wiring doc GEP-F405-HD V3 -> ROCK 5A UART7
+  (docs/wiring_gep_f405.md).
+
+### Changed
+- Predecessor project names purged from code/config (ADRs and
+  SYNERGY_MAP keep the history); deploy.sh is path-independent (wslpath);
+  binary dumps removed from git (~18 MB).
+
 ## [0.1.0] - 2026-09-03
 
 First working release: hybrid detection+tracking on RK3588S hardware,

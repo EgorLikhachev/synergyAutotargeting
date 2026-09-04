@@ -2,11 +2,11 @@
 # Копируйте в config.toml и правьте под своё железо.
 
 [camera]
-device = "/dev/video0"
+device = "/dev/video-pseye"   # стабильный udev-алиас по VID:PID 1415:2000 (см. pseye/README.md); либо /dev/video0
 width = 640
 height = 480
-fps = 30
-format = "mjpeg"            # "mjpeg" | "yuyv" | "grbg" (raw Bayer PS Eye/ov534)
+fps = 60
+format = "grbg"             # "mjpeg" | "yuyv" | "grbg" (raw Bayer PS Eye/ov534) (raw Bayer PS Eye/ov534)
 queue_depth = 4
 
 [detector]

@@ -4,7 +4,8 @@
 **SoC:** RK3588S, 4× Cortex-A76 + 4× Cortex-A55, 16GB RAM, NPU 6 TOPS
 **NPU runtime:** librknnrt.so **2.3.0** (apt `rknpu2-rk3588`)
 **Kernel:** 6.1.84-8-rk2410 (Radxa Debian 12 bookworm)
-**Камера:** Arducam USB (UVC `0c45:6366`, OV9782), MJPG 640×480@30
+**Камера:** Sony PS Eye (ov534, `1415:2000`, GRBG 640×480@60, `/dev/video-pseye`);
+  ранее Arducam USB (UVC `0c45:6366`, MJPG 640×480@30) — измерения §1–8 на ней
 **Код:** synergyAutotargeting main @ 77053e1 · все крейты — Rust
 
 Этот документ — living-запись первого полного прогона гибрида (вариант C)
@@ -287,3 +288,20 @@ gcc-aarch64-linux-gnu`, `librknnrt.so` (с борта, /usr/lib) →
 - Zero-copy для статических моделей трекера (риск SIGSEGV по ADR-006,
   выигрыш ~1–2 мс при текущих 6.2 мс — низкий приоритет).
 - H.264 (mpph264enc) — при переходе на Wi-Fi/удалённый доступ.
+
+## 14. PS Eye (2026-09-04)
+
+- Драйвер: out-of-tree gspca_main + gspca_ov534 из torvalds/linux v6.1,
+  собран нативно на борту (pseye/README.md); udev-алиас `/dev/video-pseye`
+  по VID:PID 1415:2000 (пере-enumeration USB больше не важна).
+- Формат: raw Bayer GRBG 640×480@60 (также 320×240 до 187 fps);
+  демозаик на борту (`capture::convert::demosaic_grbg_to_rgb24`).
+- Чистота кадра: tiled-детектор mean_diff ≈ 35 (порог 30), корреляция
+  ninths 0.10/0.18 — естественная сцена, не реплика 3×3; цвета
+  R̄107/Ḡ108/B̄93 (баланс без коррекции).
+- 60 FPS подтверждены в стриме push при 30 Гц UI-декоде; рваные кадры
+  (обрыв стрима при рестарте UI) пропускаются с warning, процесс жив.
+- Инцидент дня: конфиг указывал на /dev/video1 при одной камере (PS Eye
+  стала video0) → 129 рестартов сервиса завалили ядро и сеть на ~12 ч.
+  Фикс: retry камеры внутри процесса + RestartSec=10 + udev-алиас
+  (commit 2dda200).

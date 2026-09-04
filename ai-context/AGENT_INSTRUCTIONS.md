@@ -6,7 +6,7 @@
   Быстрее: tools/deploy.sh (кросс из WSL, ~1 мин).
 - Перед изменениями: docs/SDD-SPEC.md; изменения поведения → ADR в
   docs/sdd/decisions.md; замеры → docs/HARDWARE_TEST_RESULTS.md.
-- После каждого этапа: cargo test --workspace (52+ тестов),
+- После каждого этапа: cargo test --workspace (63 теста),
   на борту tools/bench.sh (сравнение с bench_baseline).
 - Стрим для наблюдения: python tools/viewer.py + на борту
   --stream-push <ip>:9000, смотреть http://127.0.0.1:9001/.
