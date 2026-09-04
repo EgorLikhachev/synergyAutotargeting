@@ -1063,7 +1063,25 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
             // кадра вынесено в open_validated_camera — используется и на
             // старте, и для восстановления посреди потока. detile=true —
             // аварийный режим (один тайл на весь кадр).
-            let (mut rx, mut src, mut detile) = open_validated_camera(&rt, &vcfg)?;
+            // Камера может отсутствовать/не отдавать кадры (конфиг указывает
+            // на несуществующее устройство, USB перечислился иначе, датчик
+            // отвалился). Падение процесса здесь = systemd-рестарты в лупе,
+            // каждая итерация пересоздаёт NPU-контекст и расшатывает ядро
+            // (инцидент 2026-09-04: 129 рестартов за загрузку уронили сеть
+            // на несколько часов). Поэтому — retry с паузой до успеха или
+            // SIGTERM; остальные подсистемы (UI-канал, стрим) продолжают жить.
+            let (mut rx, mut src, mut detile) = loop {
+                if STOP.load(Ordering::SeqCst) {
+                    bail!("остановка во время ожидания камеры");
+                }
+                match open_validated_camera(&rt, &vcfg) {
+                    Ok(v) => break v,
+                    Err(e) => {
+                        tracing::error!(error = %e, "камера недоступна на старте — повтор через 3 с");
+                        std::thread::sleep(Duration::from_secs(3));
+                    }
+                }
+            };
             tracing::info!(device = %vcfg.device, detile, "захват с камеры запущен");
 
             let started = Instant::now();
@@ -1091,8 +1109,27 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
                 }) {
                     Ok(Some(f)) => f,
                     Ok(None) => {
-                        tracing::warn!("источник кадров закрылся");
-                        break;
+                        // Источник закрылся (камера выдернута/перечислилась):
+                        // не завершаем пайплайн, а переоткрываем с retry —
+                        // см. комментарий у стартового открытия камеры.
+                        tracing::warn!("источник кадров закрылся — переоткрываю камеру");
+                        rt.block_on(src.stop()).ok();
+                        let (nrx, nsrc, ndetile) = loop {
+                            if STOP.load(Ordering::SeqCst) {
+                                bail!("остановка во время ожидания камеры");
+                            }
+                            match open_validated_camera(&rt, &vcfg) {
+                                Ok(v) => break v,
+                                Err(e) => {
+                                    tracing::error!(error = %e, "камера закрылась и не открывается — повтор через 3 с");
+                                    std::thread::sleep(Duration::from_secs(3));
+                                }
+                            }
+                        };
+                        rx = nrx;
+                        src = nsrc;
+                        detile = ndetile;
+                        continue;
                     }
                     Err(_) => {
                         // таймаут: кадров нет 500 мс — проверяем флаги и ждём дальше
@@ -1153,7 +1190,18 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
                         if tiled_streak >= 3 {
                             tracing::warn!(mean_diff, seq, "камера ушла в сбойный режим 3×3 посреди потока — восстановление");
                             rt.block_on(src.stop()).ok();
-                            let (nrx, nsrc, ndetile) = open_validated_camera(&rt, &vcfg)?;
+                            let (nrx, nsrc, ndetile) = loop {
+                                if STOP.load(Ordering::SeqCst) {
+                                    bail!("остановка во время ожидания камеры");
+                                }
+                                match open_validated_camera(&rt, &vcfg) {
+                                    Ok(v) => break v,
+                                    Err(e) => {
+                                        tracing::error!(error = %e, "камера не переоткрывается после сбойного режима — повтор через 3 с");
+                                        std::thread::sleep(Duration::from_secs(3));
+                                    }
+                                }
+                            };
                             rx = nrx;
                             src = nsrc;
                             detile = ndetile;

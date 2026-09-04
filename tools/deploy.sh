@@ -24,6 +24,7 @@ wsl -d Ubuntu -e bash -c "
 echo "== 2/4 доставка на борт =="
 scp -q "$REPO/synergy_cross" "radxa@$IP:/home/radxa/synergy/synergy_new"
 scp -q "$REPO/tools/usb_camera_reset.sh" "radxa@$IP:/home/radxa/synergy/tools_camera_reset.sh"
+scp -q "$REPO/tools/synergy.service" "radxa@$IP:/home/radxa/synergy/synergy.service"
 
 echo "== 3/4 атомарная замена + рестарт сервиса =="
 ssh -o BatchMode=yes "radxa@$IP" '
@@ -33,6 +34,8 @@ ssh -o BatchMode=yes "radxa@$IP" '
   mkdir -p ~/synergy/tools
   mv ~/synergy/tools_camera_reset.sh ~/synergy/tools/usb_camera_reset.sh
   chmod +x ~/synergy/tools/usb_camera_reset.sh
+  sudo -S cp ~/synergy/synergy.service /etc/systemd/system/synergy.service <<< "radxa" 2>/dev/null
+  sudo -S systemctl daemon-reload <<< "radxa" 2>/dev/null
   # sudoers: единственный root-вызов борта — USB reset камеры (idempotent)
   sudo -S bash <<< "radxa" 2>/dev/null -c "
     grep -q synergy-camera /etc/sudoers.d/synergy-camera 2>/dev/null || {

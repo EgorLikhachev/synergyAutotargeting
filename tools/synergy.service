@@ -8,7 +8,12 @@ User=radxa
 WorkingDirectory=/home/radxa/synergy
 ExecStart=/home/radxa/synergy/target/release/synergy --config /home/radxa/synergy/config.toml
 Restart=on-failure
-RestartSec=3
+# Пауза между рестартами: каждая попытка поднимает NPU-контекст;
+# частые повторные инициализации rknpu расшатывают ядро
+# (инцидент 2026-09-04: 129 быстрых рестартов за одну загрузку).
+# Основная защита от краш-лупа теперь в самом приложении: камера
+# недоступна → retry внутри процесса, а не выход.
+RestartSec=10
 Environment=RUST_LOG=info
 # Приоритет реального времени не даём (NPU-драйвер сам по себе тяжёлый),
 # но повышаем приоритет планировщика чуть выше дефолта.
