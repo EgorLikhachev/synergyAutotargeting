@@ -206,6 +206,7 @@ impl eframe::App for OperatorApp {
                     Some("TRACK") => (Color32::from_rgb(60, 220, 90), "TRACK"),
                     Some("ACQUIRE") => (Color32::from_rgb(80, 200, 255), "ACQUIRE"),
                     Some("LOST") => (Color32::from_rgb(255, 90, 90), "LOST"),
+                    Some("IDLE") => (Color32::GRAY, "ОЖИДАНИЕ"),
                     _ => (Color32::GRAY, "—"),
                 };
                 ui.colored_label(mode_col, egui::RichText::new(mode_txt).size(22.0).strong());
@@ -248,6 +249,21 @@ impl eframe::App for OperatorApp {
                         self.net.send(UiCommand::Stop);
                         self.arm_confirm = false;
                         self.arm_confirm_at = None;
+                    }
+                    // СНЯТЬ ЗАХВАТ: сбросить цель и трекинг; авто-захват
+                    // выключен до следующего двойного клика (режим ОЖИДАНИЕ).
+                    // Красные рамки детекций остаются — оператор выбирает
+                    // следующую цель. Наведение уходит в центры.
+                    let track_engaged = matches!(
+                        status.as_ref().map(|s| s.mode.as_str()),
+                        Some("TRACK") | Some("ACQUIRE") | Some("LOST")
+                    );
+                    let unl = egui::Button::new(
+                        egui::RichText::new("✕ СНЯТЬ ЗАХВАТ").size(15.0).strong(),
+                    )
+                    .min_size(egui::vec2(150.0, 36.0));
+                    if ui.add_enabled(track_engaged, unl).clicked() {
+                        self.net.send(UiCommand::Unlock);
                     }
                     // АРМ — двухшаговое подтверждение (безопасность):
                     // первый клик только «заряжает» кнопку, второй включает.

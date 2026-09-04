@@ -25,6 +25,9 @@ pub enum UiCmd {
     Arm { on: bool },
     /// Мгновенный СТОП: центр стиков + разарм.
     Stop,
+    /// Снять трекинг: цель сбрасывается, авто-захват выключен до
+    /// следующего lock (наведение уходит в центры).
+    Unlock,
 }
 
 /// Общие слоты между потоком канала и приложением.
@@ -165,6 +168,7 @@ fn parse_cmd(line: &str) -> Option<UiCmd> {
         }),
         "arm" => Some(UiCmd::Arm { on: v.get("on")?.as_bool()? }),
         "stop" => Some(UiCmd::Stop),
+        "unlock" => Some(UiCmd::Unlock),
         "ping" => None,
         _ => None,
     }
@@ -185,6 +189,7 @@ mod tests {
             Some(UiCmd::Arm { on: true })
         );
         assert_eq!(parse_cmd(r#"{"t":"stop"}"#), Some(UiCmd::Stop));
+        assert_eq!(parse_cmd(r#"{"t":"unlock"}"#), Some(UiCmd::Unlock));
         assert_eq!(parse_cmd(r#"{"t":"ping"}"#), None);
         assert_eq!(parse_cmd("мусор"), None);
         assert_eq!(parse_cmd(r#"{"t":"lock","x":"строка"}"#), None);

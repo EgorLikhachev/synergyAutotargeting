@@ -786,6 +786,10 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
                         ctl.set_armed(false);
                         tracing::info!("UI: СТОП наведения");
                     }
+                    control::UiCmd::Unlock => {
+                        hybrid.unlock();
+                        tracing::info!("UI: захват снят оператором (до следующего lock)");
+                    }
                 }
             }
         }
@@ -870,6 +874,7 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
             Mode::Tracking => stats.tracking_frames += 1,
             Mode::Lost => stats.lost_frames += 1,
             Mode::DetectAcquire => {}
+            Mode::Idle => {}
         }
 
         // 4) OSD + снапшоты.
@@ -949,6 +954,7 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
                     Mode::Tracking => "TRACK",
                     Mode::DetectAcquire => "ACQUIRE",
                     Mode::Lost => "LOST",
+                    Mode::Idle => "IDLE",
                 };
                 diag.commander_tick(seq, mode_s, err, vel, lead, &ch, cmd.armed);
             }
@@ -981,6 +987,7 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
                     Mode::Tracking => "TRACK",
                     Mode::DetectAcquire => "ACQUIRE",
                     Mode::Lost => "LOST",
+                    Mode::Idle => "IDLE",
                 },
                 state.score, fps, e2e_us as f32 / 1000.0,
                 dets_json.join(","), armed
@@ -1000,6 +1007,7 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
                     Mode::Tracking => "TRACK",
                     Mode::DetectAcquire => "ACQUIRE",
                     Mode::Lost => "LOST",
+                    Mode::Idle => "IDLE",
                 },
                 x: state.bbox.map(|b| b.x as i32),
                 y: state.bbox.map(|b| b.y as i32),

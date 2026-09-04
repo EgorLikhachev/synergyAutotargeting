@@ -294,6 +294,13 @@ impl NanoTracker {
         self.target_pos[1] = self.target_pos[1].clamp(0.0, h);
     }
 
+    /// Снять инициализацию (оператор снял захват): до следующего init
+    /// update() возвращает вырожденный бокс.
+    pub fn clear(&mut self) {
+        self.template = None;
+        self.tracking_score = 0.0;
+    }
+
     /// Инициализирован ли трекер.
     pub fn is_initialized(&self) -> bool {
         self.template.is_some()

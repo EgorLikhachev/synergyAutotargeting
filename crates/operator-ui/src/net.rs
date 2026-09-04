@@ -16,6 +16,8 @@ pub enum UiCommand {
     Lock { x: f32, y: f32, size: f32 },
     Arm { on: bool },
     Stop,
+    /// Снять трекинг (цель сбрасывается, авто-захват до следующего lock).
+    Unlock,
 }
 
 impl UiCommand {
@@ -26,6 +28,7 @@ impl UiCommand {
             }
             UiCommand::Arm { on } => format!("{{\"t\":\"arm\",\"on\":{on}}}\n"),
             UiCommand::Stop => "{\"t\":\"stop\"}\n".into(),
+            UiCommand::Unlock => "{\"t\":\"unlock\"}\n".into(),
         }
     }
 }
@@ -477,6 +480,8 @@ mod tests {
         assert!(l.contains("\"t\":\"lock\""));
         let s = UiCommand::Stop.to_json();
         assert_eq!(s.trim(), "{\"t\":\"stop\"}");
+        let u = UiCommand::Unlock.to_json();
+        assert_eq!(u.trim(), "{\"t\":\"unlock\"}");
     }
 
     #[test]

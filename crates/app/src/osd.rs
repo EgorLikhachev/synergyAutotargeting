@@ -31,6 +31,7 @@ pub fn mode_color(mode: Mode) -> Rgb {
         Mode::Tracking => Rgb::Green,
         Mode::DetectAcquire => Rgb::Cyan,
         Mode::Lost => Rgb::Red,
+        Mode::Idle => Rgb::White,
     }
 }
 

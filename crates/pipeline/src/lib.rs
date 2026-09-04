@@ -19,6 +19,9 @@ pub enum Mode {
     DetectAcquire,
     /// Цель потеряна, ждём очередной детекции.
     Lost,
+    /// Трекинг снят оператором («снять захват»): цели нет, авто-захват
+    /// по детекциям выключен до следующего ручного lock.
+    Idle,
 }
 
 /// Конфигурация гибрида.
@@ -82,6 +85,9 @@ pub struct HybridTracker {
     low_score_streak: u32,
     last_bbox: Option<BBox>,
     last_det_iou: Option<f32>,
+    /// Авто-захват по детекциям. Снимается командой unlock() и включается
+    /// обратно ручным захватом оператора.
+    auto_acquire: bool,
     pub detect_inflight: bool,
     /// Оценка глобального сдвига последнего кадра (GMC, L4).
     pub last_gmc: Option<(f32, f32)>,
@@ -108,16 +114,38 @@ impl HybridTracker {
             low_score_streak: 0,
             last_bbox: None,
             last_det_iou: None,
+            auto_acquire: true,
             detect_inflight: false,
         }
     }
 
     /// Нужна ли детекция на этом кадре (по расписанию или из-за потери цели).
+    /// В Idle (захват снят) — только плановое расписание: форс-каждый-кадр
+    /// нужен лишь для ре-захвата, который выключен.
     pub fn wants_detection(&self, frame_idx: u64) -> bool {
-        let lost = self.last_bbox.is_none()
-            || self.low_score_streak >= self.config.lost_patience
-            || !self.tracker.is_initialized();
+        let lost = self.auto_acquire
+            && (self.last_bbox.is_none()
+                || self.low_score_streak >= self.config.lost_patience
+                || !self.tracker.is_initialized());
         should_detect(frame_idx, self.config.detect_every_n, lost)
+    }
+
+    /// Снять трекинг оператором («снять захват»): цель сбрасывается,
+    /// авто-захват по детекциям выключается до следующего ручного lock.
+    /// Наведение уходит в центры (commander: не-Tracking → lost()).
+    pub fn unlock(&mut self) {
+        self.auto_acquire = false;
+        self.last_bbox = None;
+        self.last_det_iou = None;
+        self.low_score_streak = 0;
+        self.detect_inflight = false;
+        self.tracker.clear();
+        self.stabilizer.clear();
+    }
+
+    /// Захват снят оператором (авто-захват выключен)?
+    pub fn is_idle(&self) -> bool {
+        !self.auto_acquire
     }
 
     /// Подать результаты детекции (вызываются когда детектор ответил).
@@ -129,6 +157,12 @@ impl HybridTracker {
     ) -> TargetState {
         self.detect_inflight = false;
         self.frames_since_detect = 0;
+
+        // Захват снят оператором: детекции идут в UI (красные рамки),
+        // но цель не переинициализируется до ручного lock.
+        if !self.auto_acquire {
+            return self.state(Mode::Idle);
+        }
 
         let dets: Vec<&Detection> = dets
             .iter()
@@ -194,6 +228,8 @@ impl HybridTracker {
     /// Ручной захват цели оператором (двойной клик в UI): инициализация
     /// трекера прямо на ROI, без детекции — первичная сигнатура цели.
     pub fn on_manual_roi(&mut self, bbox: BBox, frame: &nano_track::imgops::Img) -> TargetState {
+        // Ручной захват возвращает авто-захват (снимал его unlock()).
+        self.auto_acquire = true;
         let mut box_ = bbox;
         box_.clamp_to(frame.w, frame.h);
         if box_.w < 8.0 || box_.h < 8.0 {
@@ -217,6 +253,11 @@ impl HybridTracker {
     /// Обработать кадр трекером (каждый кадр).
     pub fn on_frame(&mut self, frame: &nano_track::imgops::Img) -> TargetState {
         self.frames_since_detect += 1;
+
+        // Захват снят оператором: трекер не работает, цели нет.
+        if !self.auto_acquire {
+            return self.state(Mode::Idle);
+        }
 
         if !self.tracker.is_initialized() {
             return self.state(Mode::Lost);
