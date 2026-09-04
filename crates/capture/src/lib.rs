@@ -41,6 +41,7 @@ impl VideoSourceConfig {
             "yuyv" => PixelFormat::Yuyv,
             "rgb24" => PixelFormat::Rgb24,
             "mjpeg" => PixelFormat::Mjpeg,
+            "grbg" => PixelFormat::BayerGrbg,
             other => {
                 tracing::warn!(format = other, "неизвестный формат пикселей, беру MJPEG");
                 PixelFormat::Mjpeg

@@ -17,6 +17,8 @@ pub enum PixelFormat {
     Nv12,
     /// RGB24 packed, 3 байта на пиксель.
     Rgb24,
+    /// Raw Bayer GRBG 8 бит (Sony PS Eye / ov534): 1 байт на пиксель.
+    BayerGrbg,
 }
 
 impl PixelFormat {
@@ -26,6 +28,7 @@ impl PixelFormat {
             PixelFormat::Yuyv => 2,
             PixelFormat::Nv12 => 3, // 1.5 на пиксель, но удобнее 3/2 учитывать отдельно
             PixelFormat::Rgb24 => 3,
+            PixelFormat::BayerGrbg => 1,
         }
     }
 }
@@ -158,7 +161,7 @@ pub struct VideoConfig {
     pub width: u32,
     pub height: u32,
     pub fps: u32,
-    /// "mjpeg" | "yuyv" | "nv12"
+    /// "mjpeg" | "yuyv" | "nv12" | "rgb24" | "grbg" (raw Bayer PS Eye)
     pub format: String,
     pub queue_depth: usize,
 }

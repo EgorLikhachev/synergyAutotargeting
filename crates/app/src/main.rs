@@ -1107,10 +1107,14 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
                 );
                 let frame_recv = Instant::now(); // e2e: до декодирования
                 let dec_t0 = Instant::now();
-                let rgb_frame: Frame = if frame.metadata.format == PixelFormat::Mjpeg {
-                    decode_mjpeg_to_rgb(&frame).context("декодирование MJPEG")?
-                } else {
-                    frame
+                let rgb_frame: Frame = match frame.metadata.format {
+                    PixelFormat::Mjpeg => {
+                        decode_mjpeg_to_rgb(&frame).context("декодирование MJPEG")?
+                    }
+                    // PS Eye (ov534): raw Bayer GRBG → RGB24.
+                    PixelFormat::BayerGrbg => capture::convert::demosaic_grbg_to_rgb24(&frame)
+                        .context("демозаик GRBG")?,
+                    _ => frame,
                 };
                 let dec_us = dec_t0.elapsed().as_micros() as u64;
                 fps = fps_counter.tick();
@@ -1511,10 +1515,15 @@ fn uniform_frame(rgb: &[u8]) -> bool {
 /// Порог mean_diff между девятыми кадра: сбойная реплика 3×3 ниже, живая
 /// сцена выше. Калибровка на живом железе (2026-09-02): реальный сбойный
 /// кадр дал 11.6 (тайлы — копии, но с небольшим яркостным смещением на
-/// тайл), чистая сцена той же камеры — 85. Порог 30 — середина с запасом.
+/// тайл), чистая сцена той же камеры — 85. PS Eye (GRBG, 2026-09-04) дала
+/// чистую сцену 34.6 — поэтому одного mean_diff мало: добавлен второй
+/// критерий — корреляция девятых (реплика ≈ 0.99, сцена — низкая).
 const TILED_MEAN_DIFF_LIMIT: f32 = 30.0;
+/// Порог корреляции: у реплики девятые линейно связаны (после вычитания
+/// среднего — яркостные смещения тайлов гаснут), у живой сцены — нет.
+const TILED_CORR_LIMIT: f32 = 0.85;
 
-#[cfg_attr(not(target_os = "linux"), allow(dead_code))] // используется только стартовым гвардом камеры
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))] // используется только гвардом камеры
 fn frame_tiled_replication(rgb: &[u8], w: u32, h: u32) -> (bool, f32) {
     let (w, h) = (w as usize, h as usize);
     if w < 24 || h < 24 || rgb.len() < w * h * 3 {
@@ -1527,15 +1536,22 @@ fn frame_tiled_replication(rgb: &[u8], w: u32, h: u32) -> (bool, f32) {
     let mut samples = 0u64;
     let mut sum = 0u64;
     let mut sum_sq = 0u64;
+    // Накопители корреляции пар (левый-средний) и (левый-нижний).
+    let (mut h_sa, mut h_sb, mut h_saa, mut h_sbb, mut h_sab) = (0i64, 0i64, 0i64, 0i64, 0i64);
+    let (mut v_sa, mut v_sb, mut v_saa, mut v_sbb, mut v_sab) = (0i64, 0i64, 0i64, 0i64, 0i64);
     for y in (0..th).step_by(step) {
         for x in (0..tw).step_by(step) {
             let a = (y * w + x) * 3;
             let right = (y * w + tw + x) * 3;
             let below = ((y + th) * w + x) * 3;
-            let ra = rgb[a] as u32;
-            acc += (ra).abs_diff(rgb[right] as u32) as u64;
-            acc += (ra).abs_diff(rgb[below] as u32) as u64;
+            let ra = rgb[a] as u32 as i64;
+            let rr = rgb[right] as u32 as i64;
+            let rb = rgb[below] as u32 as i64;
+            acc += (ra as u32).abs_diff(rr as u32) as u64;
+            acc += (ra as u32).abs_diff(rb as u32) as u64;
             diffs += 2;
+            h_sa += ra; h_sb += rr; h_saa += ra * ra; h_sbb += rr * rr; h_sab += ra * rr;
+            v_sa += ra; v_sb += rb; v_saa += ra * ra; v_sbb += rb * rb; v_sab += ra * rb;
             sum += ra as u64;
             sum_sq += (ra * ra) as u64;
             samples += 1;
@@ -1547,7 +1563,23 @@ fn frame_tiled_replication(rgb: &[u8], w: u32, h: u32) -> (bool, f32) {
         return (false, 0.0); // однородная сцена — не различить
     }
     let mean_diff = acc as f32 / diffs as f32;
-    (mean_diff < TILED_MEAN_DIFF_LIMIT, mean_diff)
+    if mean_diff >= TILED_MEAN_DIFF_LIMIT {
+        return (false, mean_diff);
+    }
+    // Корреляция Пирсона по сэмплам; вырожденные знаменатели → 0.
+    let corr = |sa: i64, sb: i64, saa: i64, sbb: i64, sab: i64| -> f32 {
+        let n = samples as f64;
+        let num = n * sab as f64 - sa as f64 * sb as f64;
+        let da = n * saa as f64 - sa as f64 * sa as f64;
+        let db = n * sbb as f64 - sb as f64 * sb as f64;
+        if da <= 0.0 || db <= 0.0 {
+            return 0.0;
+        }
+        (num / (da * db).sqrt()) as f32
+    };
+    let ch = corr(h_sa, h_sb, h_saa, h_sbb, h_sab);
+    let cv = corr(v_sa, v_sb, v_saa, v_sbb, v_sab);
+    (ch > TILED_CORR_LIMIT && cv > TILED_CORR_LIMIT, mean_diff)
 }
 
 /// Аварийный режим «камера застряла в 3×3»: тайлы идентичны, поэтому
@@ -1610,6 +1642,14 @@ fn open_validated_camera(
             Ok(rx) => rx,
             Err(e) => return Err(e).context("запуск захвата"),
         };
+        // Кадр → RGB для проверок (MJPEG-декод или демозаик Bayer).
+        let to_rgb = |f: &Frame| -> Option<Frame> {
+            match f.metadata.format {
+                PixelFormat::Mjpeg => decode_mjpeg_to_rgb(f).ok(),
+                PixelFormat::BayerGrbg => capture::convert::demosaic_grbg_to_rgb24(f).ok(),
+                _ => Some(f.clone()),
+            }
+        };
         // Автоэкспозиция прогревается тёмным кадром — гвард «однородной
         // сцены» может пропустить тайлы. До 10 кадров ждём текстуру; если
         // кадры идут, но сцена без текстуры (тёмная комната) — принимаем:
@@ -1621,7 +1661,7 @@ fn open_validated_camera(
                 tokio::time::timeout(Duration::from_secs(3), rx.recv()).await
             }) {
                 Ok(Some(f)) => {
-                    if let Ok(rgbf) = decode_mjpeg_to_rgb(&f) {
+                    if let Some(rgbf) = to_rgb(&f) {
                         if uniform_frame(&rgbf.data) {
                             tracing::debug!("кадр однородный (прогрев экспозиции) — берём следующий");
                             last_uniform = Some(f);
@@ -1643,24 +1683,22 @@ fn open_validated_camera(
                 continue;
             }
         };
-        if frame.metadata.format == PixelFormat::Mjpeg {
-            if let Ok(rgbf) = decode_mjpeg_to_rgb(&frame) {
-                let (tiled, mean_diff) = frame_tiled_replication(
-                    &rgbf.data,
-                    rgbf.metadata.width,
-                    rgbf.metadata.height,
+        if let Some(rgbf) = to_rgb(&frame) {
+            let (tiled, mean_diff) = frame_tiled_replication(
+                &rgbf.data,
+                rgbf.metadata.width,
+                rgbf.metadata.height,
+            );
+            tracing::info!(attempt, tiled, mean_diff, "первый кадр проверен");
+            if tiled {
+                tracing::warn!(
+                    attempt,
+                    mean_diff,
+                    "камера в сбойном режиме (кадр 3×3), пересоздаю источник"
                 );
-                tracing::info!(attempt, tiled, mean_diff, "первый кадр проверен");
-                if tiled {
-                    tracing::warn!(
-                        attempt,
-                        mean_diff,
-                        "камера в сбойном режиме (кадр 3×3), пересоздаю источник"
-                    );
-                    last_fail = Some(("tiled", mean_diff));
-                    rt.block_on(src.stop()).ok();
-                    continue;
-                }
+                last_fail = Some(("tiled", mean_diff));
+                rt.block_on(src.stop()).ok();
+                continue;
             }
         }
         return Ok((rx, src, false));
@@ -1772,6 +1810,31 @@ mod tests {
         let wall = vec![128u8; (w * h * 3) as usize];
         let (tiled3, _) = frame_tiled_replication(&wall, w, h);
         assert!(!tiled3);
+        // Гладкая, но НЕ реплицированная сцена (PS Eye): девятые похожи по
+        // яркости (mean_diff < 30), но структура не коррелирует — не «тайл».
+        let (tw, th) = (w as usize / 3, h as usize / 3);
+        let mut soft = vec![0u8; (w * h * 3) as usize];
+        for ty in 0..3usize {
+            for tx in 0..3usize {
+                // у каждого тайла своя фаза «пятен» → низкая корреляция
+                let (py, px) = (ty as f32 * 2.1, tx as f32 * 1.7);
+                for y in 0..th {
+                    for x in 0..tw {
+                        let v = 128.0
+                            + 22.0
+                                * ((x as f32 / 9.0 + px).sin()
+                                    * ((y as f32 / 7.0 + py).cos()));
+                        let i = ((ty * th + y) * w as usize + tx * tw + x) * 3;
+                        let v8 = v.clamp(0.0, 255.0) as u8;
+                        soft[i] = v8;
+                        soft[i + 1] = v8;
+                        soft[i + 2] = v8;
+                    }
+                }
+            }
+        }
+        let (tiled5, d5) = frame_tiled_replication(&soft, w, h);
+        assert!(!tiled5, "гладкая сцена ошибочно признана репликой, mean_diff={d5}");
     }
 
     #[test]
@@ -1869,24 +1932,11 @@ fn encode_jpeg_bytes(rgb: &[u8], w: u32, h: u32, quality: u8) -> Result<Vec<u8>>
     let mut out = Vec::with_capacity(rgb.len() / 6);
     {
         let encoder = jpeg_encoder::Encoder::new(&mut out, quality);
-        let mut planar = Vec::with_capacity(rgb.len());
-        let mut r = Vec::with_capacity(rgb.len() / 3);
-        let mut g = Vec::with_capacity(rgb.len() / 3);
-        let mut b = Vec::with_capacity(rgb.len() / 3);
-        for px in rgb.chunks_exact(3) {
-            r.push(px[0]);
-            g.push(px[1]);
-            b.push(px[2]);
-        }
-        planar.extend_from_slice(&r);
-        planar.extend_from_slice(&g);
-        planar.extend_from_slice(&b);
-        encoder.encode(
-            &planar,
-            w as u16,
-            h as u16,
-            jpeg_encoder::ColorType::Rgb,
-        )?;
+        // ВАЖНО: ColorType::Rgb ждёт ИНТЕРЛИВЕД (r,g,b на пиксель).
+        // Исторический баг (2026-09-02..04, ADR-018): сюда передавали
+        // планарный буфер [RR..GG..BB] — энкодер читал его как построчный
+        // и получалась «сетка 3×3» на ЛЮБОЙ камере; камеры были невиновны.
+        encoder.encode(rgb, w as u16, h as u16, jpeg_encoder::ColorType::Rgb)?;
     }
     Ok(out)
 }

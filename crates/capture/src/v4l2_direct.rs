@@ -54,6 +54,8 @@ const V4L2_MEMORY_MMAP: u32 = 1;
 const V4L2_PIX_FMT_MJPEG: u32 = 0x47504a4d;
 const V4L2_PIX_FMT_YUYV: u32 = 0x56595559;
 const V4L2_PIX_FMT_NV12: u32 = 0x3231564e;
+/// V4L2_PIX_FMT_SGRBG8 ('GRBG') — raw Bayer, отдаёт Sony PS Eye (ov534).
+const V4L2_PIX_FMT_SGRBG8: u32 = 0x47524247;
 
 // === V4L2 structs (sizes MUST match kernel on 64-bit Linux) ===
 // We use repr(C) + explicit padding to match sizeof() exactly.
@@ -205,6 +207,7 @@ impl V4l2DirectSource {
             PixelFormat::Yuyv => V4L2_PIX_FMT_YUYV,
             PixelFormat::Nv12 => V4L2_PIX_FMT_NV12,
             PixelFormat::Rgb24 => V4L2_PIX_FMT_YUYV,
+            PixelFormat::BayerGrbg => V4L2_PIX_FMT_SGRBG8,
         }
     }
 }

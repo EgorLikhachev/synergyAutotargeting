@@ -408,11 +408,96 @@ pub fn convert_to(frame: &Frame, target: PixelFormat) -> ConversionResult<Frame>
         (PixelFormat::Yuyv, PixelFormat::Rgb24) => yuyv_to_rgb24(frame),
         (PixelFormat::Rgb24, PixelFormat::Nv12) => rgb24_to_nv12(frame),
         (PixelFormat::Nv12, PixelFormat::Rgb24) => nv12_to_rgb24(frame),
+        (PixelFormat::BayerGrbg, PixelFormat::Rgb24) => demosaic_grbg_to_rgb24(frame),
         (from, to) => {
             warn!(?from, ?to, "unsupported conversion");
             Err(ConversionError::UnsupportedConversion { from, to })
         }
     }
+}
+
+/// Raw Bayer GRBG → RGB24 (Sony PS Eye / ov534).
+///
+/// Раскладка 2×2: `G R / B G` (по чётности x,y). Базовый демозаик
+/// с усреднением соседей (у G горизонталь/вертикаль по паритету, у R/B —
+/// диагонали), границы дублируются клампом. Для трекинга/детекции этого
+/// достаточно; качество цвета вторично.
+pub fn demosaic_grbg_to_rgb24(frame: &Frame) -> ConversionResult<Frame> {
+    if frame.metadata.format != PixelFormat::BayerGrbg {
+        return Err(ConversionError::InvalidFormat {
+            expected: PixelFormat::BayerGrbg,
+            actual: frame.metadata.format,
+        });
+    }
+
+    let w = frame.metadata.width as usize;
+    let h = frame.metadata.height as usize;
+    if frame.data.len() != w * h {
+        return Err(ConversionError::InvalidDimensions {
+            w: w as u32,
+            h: h as u32,
+            len: frame.data.len(),
+        });
+    }
+    if w < 2 || h < 2 {
+        return Err(ConversionError::InvalidDimensions {
+            w: w as u32,
+            h: h as u32,
+            len: frame.data.len(),
+        });
+    }
+
+    let src = &frame.data;
+    let px = |x: usize, y: usize| src[y * w + x] as u32;
+    let mut rgb = vec![0u8; w * h * 3];
+
+    for y in 0..h {
+        let (yu, yd) = (y.saturating_sub(1), (y + 1).min(h - 1));
+        for x in 0..w {
+            let (xl, xr) = (x.saturating_sub(1), (x + 1).min(w - 1));
+            let i = (y * w + x) * 3;
+            let (r, g, b) = match (x % 2, y % 2) {
+                // G (чёт,чёт): R — горизонталь, B — вертикаль.
+                (0, 0) => (
+                    (px(xl, y) + px(xr, y)) / 2,
+                    px(x, y),
+                    (px(x, yu) + px(x, yd)) / 2,
+                ),
+                // R (неч,чёт): G — горизонталь, B — диагонали.
+                (1, 0) => (
+                    px(x, y),
+                    (px(xl, y) + px(xr, y)) / 2,
+                    (px(xl, yu) + px(xr, yu) + px(xl, yd) + px(xr, yd)) / 4,
+                ),
+                // B (чёт,неч): G — вертикаль, R — диагонали.
+                (0, 1) => (
+                    (px(xl, yu) + px(xr, yu) + px(xl, yd) + px(xr, yd)) / 4,
+                    (px(x, yu) + px(x, yd)) / 2,
+                    px(x, y),
+                ),
+                // G (неч,неч): R — вертикаль, B — горизонталь.
+                _ => (
+                    (px(x, yu) + px(x, yd)) / 2,
+                    px(x, y),
+                    (px(xl, y) + px(xr, y)) / 2,
+                ),
+            };
+            rgb[i] = r as u8;
+            rgb[i + 1] = g as u8;
+            rgb[i + 2] = b as u8;
+        }
+    }
+
+    Ok(Frame {
+        data: rgb,
+        metadata: FrameMetadata {
+            width: w as u32,
+            height: h as u32,
+            format: PixelFormat::Rgb24,
+            captured_at: frame.metadata.captured_at,
+            seq: frame.metadata.seq,
+        },
+    })
 }
 
 // === Вспомогательные функции ===
@@ -509,6 +594,35 @@ mod tests {
         let frame = make_frame(vec![0; 100], 10, 10, PixelFormat::Rgb24);
         let result = convert_to(&frame, PixelFormat::Rgb24).unwrap();
         assert_eq!(result.data, frame.data);
+    }
+
+    #[test]
+    fn grbg_demosaic_channels() {
+        // 6×6 GRBG-плоскости чистых цветов: G-сайты=100, R-сайты=200,
+        // B-сайты=50. Проверяем интерьер (у границы соседи клампятся).
+        let (w, h) = (6usize, 6usize);
+        let mut data = vec![0u8; w * h];
+        for y in 0..h {
+            for x in 0..w {
+                data[y * w + x] = match (x % 2, y % 2) {
+                    (0, 0) | (1, 1) => 100, // G
+                    (1, 0) => 200,          // R
+                    _ => 50,                // B
+                };
+            }
+        }
+        let frame = make_frame(data, w as u32, h as u32, PixelFormat::BayerGrbg);
+        let rgb = demosaic_grbg_to_rgb24(&frame).unwrap();
+        assert_eq!(rgb.metadata.format, PixelFormat::Rgb24);
+        let at = |x: usize, y: usize| -> [u8; 3] {
+            let i = (y * w + x) * 3;
+            [rgb.data[i], rgb.data[i + 1], rgb.data[i + 2]]
+        };
+        // На плоскостях чистых цветов любой интерьерный пиксель = [200,100,50].
+        assert_eq!(at(3, 2), [200, 100, 50], "R-сайт");
+        assert_eq!(at(2, 3), [200, 100, 50], "B-сайт");
+        assert_eq!(at(2, 2), [200, 100, 50], "G-сайт (чёт,чёт)");
+        assert_eq!(at(3, 3), [200, 100, 50], "G-сайт (неч,неч)");
     }
 
     #[test]

@@ -6,7 +6,7 @@ device = "/dev/video0"
 width = 640
 height = 480
 fps = 30
-format = "mjpeg"
+format = "mjpeg"            # "mjpeg" | "yuyv" | "grbg" (raw Bayer PS Eye/ov534)
 queue_depth = 4
 
 [detector]
