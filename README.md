@@ -72,13 +72,13 @@ The app reads `config.toml` (copy from `config.example.toml`). Main sections:
 
 | Section | Keys (defaults) | Meaning |
 |---|---|---|
-| `[camera]` | `device=/dev/video0`, `width/height=640/480`, `fps=60`, `format="mjpeg"`, `queue_depth=4` | V4L2 capture |
+| `[camera]` | `device=/dev/video-pseye`, `width/height=640/480`, `fps=60`, `format="grbg"`, `queue_depth=4` | V4L2 capture; PS Eye via stable udev alias (VID:PID 1415:2000, see `pseye/README.md`); formats: `mjpeg`/`yuyv`/`grbg` |
 | `[detector]` | `model_path=models/model_5_dynamic_rk3588.rknn`, `input_size=640`, `conf_threshold=0.45`, `nms_threshold=0.45`, `class_thresholds={}` | YOLOv8 NPU detector (per-class thresholds override the global one) |
 | `[tracker]` | `backend="tract"` or `"rknn"`, model paths for both backends, `swap_rb=false`, `min_track_score=0.30` | NanoTrack; `rknn` runs on the NPU (~6 ms/frame) |
 | `[pipeline]` | `detect_every_n=10`, `iou_confirm=0.30`, `lost_patience=3`, `gmc=false` | hybrid logic; `gmc` enables digital stabilization for hard-mounted cameras |
 | `[output]` | `dir="data"`, `snapshot_every=30`, `telemetry=true`, `duration_secs=0` | snapshots (`data/frame_XXXXXX.jpg`), JSONL telemetry |
 | `[stream]` | `enabled=false`, `bind="0.0.0.0:8080"`, `push_to=""`, `frame_div=2`, `quality=80`, `record=""`, `record_h264=""` | MJPEG OSD streaming and recording |
-| `[commander]` | `enabled=false`, `device="/dev/ttyS6"`, `baud=115200`, `rate_hz=30`, `kp/ki/kd`, `lead_s=0.0`, `swap_axes=false` | aiming loop: pixel error → PID → MSP RC channels over UART |
+| `[commander]` | `enabled=false`, `device="/dev/ttyS7"`, `baud=115200`, `rate_hz=30`, `kp/ki/kd`, `lead_s=0.0`, `swap_axes=false` | aiming loop: pixel error → PID → MSP RC channels over UART |
 | `[synthetic]` | `shake_px=0.0` | camera-shake simulation for stabilization testing |
 
 Environment variables:
@@ -126,10 +126,12 @@ tools/bench.sh
 # Aiming loop in simulation (no UART hardware)
 # config.toml: [commander] enabled=true, simulate=true
 
-# Operator desktop app (video + click-to-lock + ARM/STOP):
+# Operator desktop app (video + click-to-lock + ARM/STOP/unlock/recording):
 cargo run --release -p operator-ui                 # listens :9000/:9010
 # on the board: synergy --duration 0 --ui <this-pc-ip>:9010
-# double-click on video = capture target; ARM/STOP control the aiming loop
+# double-click on video = capture target; "× СНЯТЬ ЗАХВАТ" (or unlock) drops it
+# until the next lock (IDLE mode); ARM/STOP control the aiming loop;
+# ● ЗАПИСЬ (R) records the stream to records/*.mjpg (replay-compatible)
 ```
 
 CLI flags: `--config PATH`, `--synthetic`, `--duration SEC`, `--demo-detect`,
@@ -139,7 +141,7 @@ CLI flags: `--config PATH`, `--synthetic`, `--duration SEC`, `--demo-detect`,
 ## Testing
 
 ```bash
-cargo test --workspace      # 55+ unit tests (decoder, PID, MSP, stabilization…)
+cargo test --workspace      # 63 unit tests (decoder, PID, MSP, stabilization…)
 cargo clippy --workspace    # CI enforces zero warnings
 ```
 
@@ -160,11 +162,15 @@ crates/
   streaming/   MJPEG server + push mode (pure std)
   commander/   aiming: PID + slew/deadband + lead predictor, MSP v1 codec
   app/         CLI binary `synergy`: config, OSD, telemetry, recorder
-  operator-ui/ desktop app (egui): video, click-to-lock, ARM/STOP
+  operator-ui/ desktop app (egui): video, click-to-lock, ARM/STOP,
+               unlock (IDLE), .mjpg recording, hotkeys Esc/F/R
 models/        ONNX (CPU) and RKNN (NPU int8) model files
 tools/         viewer.py, telemetry_report.py, bench.sh, deploy.sh,
                model conversion scripts, systemd unit
-docs/          SDD spec, ADR journal, hardware test results, roadmap (Russian)
+docs/          SDD spec, ADR journal, hardware test results, roadmap (Russian);
+               safety audit, FC wiring (GEP-F405-HD V3 -> UART7)
+refvideo/      reference-video validation vs ground truth (RESULTS.md)
+pseye/         PS Eye (ov534) out-of-tree driver build for ROCK 5A
 ai-context/    session handoff notes for AI assistants
 ```
 
