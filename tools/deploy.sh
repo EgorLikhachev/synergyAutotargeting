@@ -12,7 +12,13 @@ WINREPO="$(cygpath -w "$REPO")"
 WREPO="$(wsl -d Ubuntu -e wslpath -a "$WINREPO" | tr -d '\r')"
 
 echo "== 1/4 кросс-сборка (WSL, aarch64) =="
-wsl -d Ubuntu -e bash -c "
+# Известный дефект: wsl.exe иногда не закрывает stdout-pipe после завершения
+# сборки (наследованные FD дочерних процессов) и скрипт виснет на tail.
+# Поэтому: вывод в файл, жёсткий таймаут и решение по свежести артефакта.
+BUILD_LOG="$(mktemp)"
+CROSS="$REPO/synergy_cross"
+BEFORE=$(stat -c %Y "$CROSS" 2>/dev/null || echo 0)
+if ! timeout 600 wsl -d Ubuntu -e bash -c "
   export PATH=\$PATH:/root/.cargo/bin
   cd '$WREPO' || exit 1
   CARGO_TARGET_DIR=/root/xtarget RKNN_LIB_DIR=/root/aarch64-libs \
@@ -22,7 +28,16 @@ wsl -d Ubuntu -e bash -c "
   # WSL Ubuntu 24.04 линкуется против glibc 2.39, а борт (Debian 12) — 2.36:
   # вырезаем требования версий новее 2.36 (слабые pidfd_* из Rust std).
   python3 '$WREPO/tools/strip_glibc_verneed.py' '$WREPO/synergy_cross' 36
-" | tail -2
+" >"$BUILD_LOG" 2>&1 </dev/null; then
+  echo "сборка не завершилась (таймаут/ошибка) — последние строки:"
+  tail -5 "$BUILD_LOG"
+  AFTER=$(stat -c %Y "$CROSS" 2>/dev/null || echo 0)
+  if [ "$AFTER" -le "$BEFORE" ]; then
+    rm -f "$BUILD_LOG"; exit 1
+  fi
+  echo "артефакт свежий — продолжаем (wsl.exe завис, но сборка успела)"
+fi
+tail -2 "$BUILD_LOG"; rm -f "$BUILD_LOG"
 
 echo "== 2/4 доставка на борт =="
 scp -q "$REPO/synergy_cross" "radxa@$IP:/home/radxa/synergy/synergy_new"
