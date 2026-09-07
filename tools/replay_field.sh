@@ -6,7 +6,7 @@
 # Результат: refvideo/field_runs/<имя>/ (телеметрия + сводка на экране).
 set -euo pipefail
 FILE="${1:?использование: replay_field.sh <файл.mjpg> [ip]}"
-IP="${2:-192.168.0.224}"
+IP="${2:-192.168.0.225}"
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 NAME="$(basename "$FILE" .mjpg)"
 

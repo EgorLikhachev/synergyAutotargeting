@@ -9,7 +9,7 @@
 # Эталон: ~/synergy/bench_baseline.txt; деградация >10% — красным.
 
 set -euo pipefail
-IP="${2:-192.168.0.224}"
+IP="${2:-192.168.0.225}"
 REMOTE_DIR="\$HOME/synergy"
 
 run_on_board() {

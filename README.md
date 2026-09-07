@@ -63,7 +63,7 @@ For fast iteration from a dev machine, cross-compile in WSL and deploy in one
 command (see `tools/deploy.sh`):
 
 ```bash
-tools/deploy.sh 192.168.0.224   # build → strip → scp → restart systemd service
+tools/deploy.sh 192.168.0.225   # build → strip → scp → restart systemd service
 ```
 
 ## Configuration

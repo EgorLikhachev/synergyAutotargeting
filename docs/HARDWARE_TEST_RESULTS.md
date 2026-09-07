@@ -4,6 +4,14 @@
 **SoC:** RK3588S, 4× Cortex-A76 + 4× Cortex-A55, 16GB RAM, NPU 6 TOPS
 **NPU runtime:** librknnrt.so **2.3.0** (apt `rknpu2-rk3588`)
 **Kernel:** 6.1.84-8-rk2410 (Radxa Debian 12 bookworm)
+**ВНИМАНИЕ (2026-09-07):** плата перепрошита на Armbian 26.8.3 trixie
+(vendor 6.1.115, IP теперь **192.168.0.225**) после неудачной правки
+extlinux на Radxa Debian (борт не поднялся). История ниже — замеры на
+Radxa Debian 6.1.84 / IP .224. Отличия Armbian: gspca_ov534 in-tree
+(сборка модулей не нужна), overlay через armbianEnv overlays=rk3588-uart7-m2
+(именно с префиксом rk3588-, не rockchip-!), librknnrt.so ставится руками
+в /usr/lib/aarch64-linux-gnu, radxa в группе dialout для ttyS7.
+
 **Камера:** Sony PS Eye (ov534, `1415:2000`, GRBG 640×480@60, `/dev/video-pseye`);
   ранее Arducam USB (UVC `0c45:6366`, MJPG 640×480@30) — измерения §1–8 на ней
 **Код:** synergyAutotargeting main @ 77053e1 · все крейты — Rust
