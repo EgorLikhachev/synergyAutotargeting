@@ -338,6 +338,33 @@ impl eframe::App for OperatorApp {
                     ui.weak("канал управления потерян");
                 }
             });
+            // Индикатор FC (ADR-021): видит ли полётник наш RC-поток.
+            match status.as_ref().and_then(|s| s.fc.as_ref()) {
+                Some(fc) if fc.online => {
+                    if fc.rx_ok {
+                        ui.label(
+                            egui::RichText::new("FC: СВЯЗЬ ОК, RC ПРИНИМАЕТСЯ")
+                                .size(12.0)
+                                .color(Color32::from_rgb(90, 190, 90)),
+                        );
+                    } else {
+                        ui.label(
+                            egui::RichText::new("FC: СВЯЗЬ ОК, НО RC НЕ ВИДИТ (RXLOSS)")
+                                .size(12.0)
+                                .strong()
+                                .color(Color32::from_rgb(230, 130, 40)),
+                        );
+                    }
+                }
+                Some(_) => {
+                    ui.label(
+                        egui::RichText::new("FC: НЕ ОТВЕЧАЕТ (нет телеметрии)")
+                            .size(12.0)
+                            .color(Color32::from_rgb(200, 80, 80)),
+                    );
+                }
+                None => {}
+            }
             ui.add_space(4.0);
             // кнопки
             ui.horizontal(|ui| {

@@ -59,6 +59,22 @@ pub struct Status {
     pub dets: Vec<DetsEntry>,
     #[serde(default)]
     pub armed: bool,
+    /// Телеметрия FC (ADR-021): связь борт↔полётник и видимость RC-потока.
+    #[serde(default)]
+    pub fc: Option<FcState>,
+}
+
+/// Состояние FC из статуса борта.
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct FcState {
+    #[serde(default)]
+    pub online: bool,
+    #[serde(default)]
+    pub rx_ok: bool,
+    #[serde(default)]
+    pub flags: u32,
+    #[serde(default)]
+    pub ch: Vec<u16>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

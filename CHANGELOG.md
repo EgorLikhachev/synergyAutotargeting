@@ -33,6 +33,13 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 - ARM button 2-step confirm with 4 s auto-reset and explicit state label.
 
 ### Added
+- FC telemetry in the UI status (ADR-021): commander now reads MSP replies
+  (reader thread + 2 Hz MSP_STATUS/MSP_RC polling over the same port) and
+  publishes `fc {online, rx_ok, flags, ch}` — the operator sees the
+  flight controller's actual view (RX echo with real channel values, RC
+  visibility bit). The RC-alive bit (0x80 in armingDisableFlags) was
+  determined empirically on the bench; verified end-to-end: rx_ok follows
+  arm/stop within ~1 s and the echo shows 1310/1950 while streaming.
 - Safety barriers (safety_compliance §6.2/§6.3, ADR-019/020): systemd
   watchdog (`Type=notify` + `WatchdogSec=5`, sd_notify on pure std, kick
   from all three frame loops — hang = restart into armed=false) and

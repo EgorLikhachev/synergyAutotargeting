@@ -33,7 +33,10 @@ crates/
   control     — канал UI (ADR-016): JSON-строки, dead-man 1 c; при
                 [control] token каждая строка обязана нести "auth"
                 (ADR-020); чужой трафик dead-man не продлевает
-  commander   — закон наведения + MSP v1 по UART (ADR-012); на стороне FC
+  commander   — закон наведения + MSP v1 по UART/USB (ADR-012) + телеметрия
+                FC в статус UI: поток-читатель MSP-ответов, опрос
+                STATUS/RC 2 Гц, поле "fc"{online,rx_ok,flags,ch} (ADR-021);
+                на стороне FC
                 действует ограничение Betaflight 4.4: MSP максимум на
                 VCP+2 UART (MAX_MSP_PORT_COUNT=3, иначе serialConfig молча
                 сбрасывается при каждой загрузке) + feature RX_MSP;

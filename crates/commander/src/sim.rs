@@ -56,6 +56,11 @@ impl PlatformSim {
 /// Стык передачи команд: UART на борту, симулятор/лог в тестах.
 pub trait AimLink: Send {
     fn send_rc(&mut self, ch: &[u16; 16]) -> anyhow::Result<()>;
+
+    /// Телеметрия FC, если транспорт её читает (ADR-021); None у симулятора.
+    fn fc_telemetry(&self) -> Option<std::sync::Arc<std::sync::Mutex<crate::msp::FcTelemetry>>> {
+        None
+    }
 }
 
 /// Пустой линк (телеметрия в лог).

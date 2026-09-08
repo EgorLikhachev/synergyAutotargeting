@@ -266,6 +266,14 @@ impl CommanderCtx {
     }
 
     /// АРМ/разарм от оператора; при выключении стики уходят в центр.
+    /// Снимок телеметрии FC (ADR-021) для статуса UI.
+    pub fn fc_snapshot(&self) -> commander::msp::FcTelemetry {
+        match self.link.fc_telemetry() {
+            Some(fc) => fc.lock().unwrap_or_else(|e| e.into_inner()).clone(),
+            None => commander::msp::FcTelemetry::default(),
+        }
+    }
+
     pub fn set_armed(&mut self, on: bool) {
         if self.armed && !on {
             let ch = self.law.lost();
@@ -986,8 +994,18 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
                 .as_deref()
                 .map(|c| c.armed)
                 .unwrap_or(false);
+            // Телеметрия FC (ADR-021): онлайн / видит ли полётник наш RC-поток
+            // + эхо каналов — оператор видит состояние связи с FC вживую.
+            let fc_json = commander.as_deref().map(|c| {
+                let t = c.fc_snapshot();
+                let ch: Vec<String> = t.ch.iter().take(8).map(|v| v.to_string()).collect();
+                format!(
+                    ",\"fc\":{{\"online\":{},\"rx_ok\":{},\"flags\":{},\"ch\":[{}]}}",
+                    t.online, t.rx_ok, t.flags, ch.join(",")
+                )
+            }).unwrap_or_default();
             let line = format!(
-                "{{\"t\":\"status\",\"frame_seq\":{seq},\"mode\":\"{}\",\"score\":{:.3},\"fps\":{:.1},\"e2e_ms\":{:.2},\"box\":{box_json},\"dets\":[{}],\"armed\":{}}}
+                "{{\"t\":\"status\",\"frame_seq\":{seq},\"mode\":\"{}\",\"score\":{:.3},\"fps\":{:.1},\"e2e_ms\":{:.2},\"box\":{box_json},\"dets\":[{}],\"armed\":{}{}}}
 ",
                 match state.mode {
                     Mode::Tracking => "TRACK",
@@ -996,7 +1014,7 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
                     Mode::Idle => "IDLE",
                 },
                 state.score, fps, e2e_us as f32 / 1000.0,
-                dets_json.join(","), armed
+                dets_json.join(","), armed, fc_json
             );
             ctl.send_status(line);
         }
