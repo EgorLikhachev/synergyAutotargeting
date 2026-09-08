@@ -5,7 +5,7 @@
 **NPU runtime:** librknnrt.so **2.3.0** (apt `rknpu2-rk3588`)
 **Kernel:** 6.1.84-8-rk2410 (Radxa Debian 12 bookworm)
 **ВНИМАНИЕ (2026-09-07):** плата перепрошита на Armbian 26.8.3 trixie
-(vendor 6.1.115, IP теперь **192.168.0.225**) после неудачной правки
+(vendor 6.1.115, IP теперь **192.168.0.224**) после неудачной правки
 extlinux на Radxa Debian (борт не поднялся). История ниже — замеры на
 Radxa Debian 6.1.84 / IP .224. Отличия Armbian: gspca_ov534 in-tree
 (сборка модулей не нужна), overlay через armbianEnv overlays=rk3588-uart7-m2

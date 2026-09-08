@@ -93,7 +93,7 @@ ch4=yaw/arm-aux, далее aux).
 
 ## 4. Включение UART7 на ROCK 5A (Armbian)
 
-Борт: **Armbian 26.8.3 trixie vendor 6.1.115** (192.168.0.225). Overlay:
+Борт: **Armbian 26.8.3 trixie vendor 6.1.115** (192.168.0.224). Overlay:
 
 ```bash
 # /boot/armbianEnv.txt:

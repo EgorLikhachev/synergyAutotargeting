@@ -261,11 +261,16 @@ impl Default for SyntheticConfig {
 pub struct ControlConfig {
     /// Адрес контрольного канала UI, напр. "192.168.0.174:9010"; пусто — выкл.
     pub ui_addr: String,
+    /// Общий секрет канала (safety_compliance §6.3): непустое значение требует
+    /// поле "auth" с этим значением в КАЖДОЙ команде UI (включая ping — иначе
+    /// чужой трафик не продлевает dead-man таймер). Пусто — аутентификация
+    /// выключена (обратная совместимость).
+    pub token: String,
 }
 
 impl Default for ControlConfig {
     fn default() -> Self {
-        Self { ui_addr: String::new() }
+        Self { ui_addr: String::new(), token: String::new() }
     }
 }
 

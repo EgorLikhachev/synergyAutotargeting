@@ -33,6 +33,14 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 - ARM button 2-step confirm with 4 s auto-reset and explicit state label.
 
 ### Added
+- Safety barriers (safety_compliance §6.2/§6.3, ADR-019/020): systemd
+  watchdog (`Type=notify` + `WatchdogSec=5`, sd_notify on pure std, kick
+  from all three frame loops — hang = restart into armed=false) and
+  control-channel shared-secret auth (`[control] token` + `"auth"` field
+  in every command incl. ping; unauthorized traffic no longer refreshes
+  the dead-man timer; UI/ui_sim read `SYNERGY_TOKEN` from env). Verified
+  live: watchdog timestamp advances, arm rejected without token / accepted
+  with it in 60 ms / plain commands still work with token unset.
 - **FC control over USB proven end-to-end (bench)**: the flight controller
   now hangs on the ROCK 5A's USB-A via its USB-C (VCP, udev alias
   /dev/tty-fc for 0483:5740) — zero FC-side config needed (VCP ships with

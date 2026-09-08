@@ -3,7 +3,12 @@ Description=synergy autotargeting (гибрид C: детекция NPU + тре
 After=network.target
 
 [Service]
-Type=simple
+# Type=notify + WatchdogSec: systemd-сторож (safety §6.2, фаза E) —
+# приложение шлёт READY=1 при старте и WATCHDOG=1 из кадрового цикла
+# (crates/app/src/sdnotify.rs); зависание цикла = kill + рестарт
+# в безопасном состоянии (armed=false).
+Type=notify
+WatchdogSec=5
 User=radxa
 WorkingDirectory=/home/radxa/synergy
 ExecStart=/home/radxa/synergy/target/release/synergy --config /home/radxa/synergy/config.toml

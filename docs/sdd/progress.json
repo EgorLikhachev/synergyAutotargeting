@@ -10,7 +10,7 @@
   },
   "hardware": {
     "board": "Radxa ROCK 5A v1.2 (RK3588S, 16GB)",
-    "os": "Armbian 26.8.3 trixie vendor 6.1.115 (ROCK 5A, 192.168.0.225)",
+    "os": "Armbian 26.8.3 trixie vendor 6.1.115 (ROCK 5A, 192.168.0.224)",
     "camera": "Sony PS Eye (ov534 1415:2000, GRBG 640x480@60, /dev/video-pseye udev-alias)",
     "npu_runtime": "librknnrt.so 2.3.0 (apt rknpu2-rk3588)"
   },

@@ -27,7 +27,7 @@ from fc_setports import (  # noqa: E402
 )
 
 PORT = sys.argv[1] if len(sys.argv) > 1 else 'COM4'
-BOARD = 'radxa@192.168.0.225'
+BOARD = 'radxa@192.168.0.224'
 SSH = shutil.which('ssh') or 'ssh'
 LTM = 1 << 4
 BAUD_115200_IDX = 5

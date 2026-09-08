@@ -1,7 +1,7 @@
 # Инструкция агенту
 
 - Репозиторий: synergyAutotargeting (Rust-first, ADR-001). Плата:
-  radxa@192.168.0.225 (Armbian trixie, ~/synergy, systemd synergy.service).
+  radxa@192.168.0.224 (Armbian trixie, ~/synergy, systemd synergy.service).
 - Сборка на борту: cargo build --release --features npu (~2,5 мин).
   Быстрее: tools/deploy.sh (кросс из WSL, ~1 мин).
 - Перед изменениями: docs/SDD-SPEC.md; изменения поведения → ADR в

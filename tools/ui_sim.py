@@ -15,6 +15,7 @@ keep-alive `{"t":"ping"}` каждые 300 мс — fail-safe борта: тиш
 (видео-кадры/байты, armed-переходы, команды).
 """
 import json
+import os
 import socket
 import sys
 import threading
@@ -116,6 +117,15 @@ class UiSim:
         except OSError:
             pass
 
+    def _frame(self, cmd_json):
+        """Команда/ping с общим секретом канала (safety §6.3), если задан."""
+        tok = os.environ.get('SYNERGY_TOKEN', '')
+        if tok:
+            obj = json.loads(cmd_json)
+            obj['auth'] = tok
+            cmd_json = json.dumps(obj)
+        return (cmd_json + '\n').encode()
+
     def _keepalive(self):
         last = time.time()
         while not self._writer_stop.is_set():
@@ -123,7 +133,7 @@ class UiSim:
             if time.time() - last >= 0.3 and self.ctrl_sock:
                 with self._send_lock:
                     try:
-                        self.ctrl_sock.sendall(b'{"t":"ping"}\n')
+                        self.ctrl_sock.sendall(self._frame('{"t":"ping"}'))
                     except OSError:
                         return
                 last = time.time()
@@ -134,7 +144,7 @@ class UiSim:
             return False
         with self._send_lock:
             try:
-                self.ctrl_sock.sendall(cmd_json.encode() + b'\n')
+                self.ctrl_sock.sendall(self._frame(cmd_json))
                 self._log('>> ' + cmd_json)
                 self.events.append((time.time(), cmd_json))
                 return True
@@ -177,7 +187,12 @@ class UiSim:
 
 
 if __name__ == '__main__':
-    if len(sys.argv) < 2:
+    args = sys.argv[1:]
+    if '--token' in args:
+        i = args.index('--token')
+        os.environ['SYNERGY_TOKEN'] = args[i + 1]
+        del args[i:i + 2]
+    if not args:
         print(__doc__)
         sys.exit(1)
-    UiSim().run(sys.argv[1:])
+    UiSim().run(args)

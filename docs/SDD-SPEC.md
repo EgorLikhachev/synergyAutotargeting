@@ -30,6 +30,9 @@ crates/
   pipeline    — HybridTracker: правила гибрида C, режимы Tracking/
                 DetectAcquire/Lost/Idle (unlock)
   streaming   — MJPEG сервер + push (борт→зритель, ADR-009)
+  control     — канал UI (ADR-016): JSON-строки, dead-man 1 c; при
+                [control] token каждая строка обязана нести "auth"
+                (ADR-020); чужой трафик dead-man не продлевает
   commander   — закон наведения + MSP v1 по UART (ADR-012); на стороне FC
                 действует ограничение Betaflight 4.4: MSP максимум на
                 VCP+2 UART (MAX_MSP_PORT_COUNT=3, иначе serialConfig молча
@@ -87,6 +90,9 @@ score, track_ms, det_ms, fps. Итог прогона — в stdout (средн�
   never-blocking для основного цикла). Шина Zenoh из Autotargeting не нужна
   для одного процесса; при разбиении на компоненты — вернуться к D-014.
 - Логирование: tracing, уровень через RUST_LOG.
+- Надёжность процесса (ADR-019): systemd Type=notify + WatchdogSec=5,
+  WATCHDOG=1 из кадровых циклов (sdnotify на std, вне systemd — no-op);
+  зависание = рестарт в безопасном состоянии (armed=false).
 - Тесты: юнит (декодер/стабилизатор/imgops/kalman) — без железа;
   синтетический режим (`--synthetic`) — полный цикл без камеры/NPU.
 

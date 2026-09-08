@@ -46,8 +46,9 @@ pub struct ControlLink {
 }
 
 impl ControlLink {
-    /// Подключаться к `addr` (например "192.168.0.174:9010"), реконнект 3 с.
-    pub fn start(addr: &str) -> Self {
+    /// Подключаться к `ui_addr` (например "192.168.0.174:9010"), реконнект 3 с.
+    /// Непустой `token` включает аутентификацию команд (safety §6.3).
+    pub fn start(ui_addr: &str, token: &str) -> Self {
         let shared = Arc::new(Shared {
             cmd: Mutex::new(None),
             status: Mutex::new(None),
@@ -57,7 +58,8 @@ impl ControlLink {
         let connected = Arc::new(AtomicBool::new(false));
         let sent_status = Arc::new(AtomicU64::new(0));
         let (sh, conn, sent) = (shared.clone(), connected.clone(), sent_status.clone());
-        let addr = addr.to_string();
+        let addr = ui_addr.to_string();
+        let token = token.to_string();
         let _ = std::thread::Builder::new()
             .name("ui-control".into())
             .spawn(move || {
@@ -94,12 +96,18 @@ impl ControlLink {
                             line.clear();
                             match reader.read_line(&mut line) {
                                 Ok(0) => break, // EOF — соединение закрыто
-                                Ok(_) => {
-                                    sh.last_msg_ms.store(now_ms(), Ordering::Relaxed);
-                                    if let Some(cmd) = parse_cmd(&line) {
+                                Ok(_) => match parse_line(&line, &token) {
+                                    LineIn::Cmd(cmd) => {
+                                        sh.last_msg_ms.store(now_ms(), Ordering::Relaxed);
                                         *sh.cmd.lock().unwrap() = Some(cmd);
                                     }
-                                }
+                                    // авторизованный ping продлевает dead-man,
+                                    // чужой трафик — нет (safety §6.3).
+                                    LineIn::Ping => {
+                                        sh.last_msg_ms.store(now_ms(), Ordering::Relaxed);
+                                    }
+                                    LineIn::Reject => {}
+                                },
                                 Err(ref e)
                                     if e.kind() == std::io::ErrorKind::WouldBlock => {}
                                 Err(_) => break,
@@ -167,20 +175,44 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
-/// Разбор команды из JSON-строки.
-fn parse_cmd(line: &str) -> Option<UiCmd> {
-    let v: serde_json::Value = serde_json::from_str(line.trim()).ok()?;
-    match v.get("t")?.as_str()? {
-        "lock" => Some(UiCmd::Lock {
-            x: v.get("x")?.as_f64()? as f32,
-            y: v.get("y")?.as_f64()? as f32,
-            size: v.get("size")?.as_f64()? as f32,
-        }),
-        "arm" => Some(UiCmd::Arm { on: v.get("on")?.as_bool()? }),
-        "stop" => Some(UiCmd::Stop),
-        "unlock" => Some(UiCmd::Unlock),
-        "ping" => None,
-        _ => None,
+/// Классификация входной строки канала.
+enum LineIn {
+    Cmd(UiCmd),
+    /// Авторизованный ping: команды нет, но живость есть.
+    Ping,
+    /// Мусор, неизвестная команда или провал аутентификации.
+    Reject,
+}
+
+/// Разбор команды из JSON-строки. При непустом `token` каждая строка (включая
+/// ping) обязана нести "auth" с точным совпадением — иначе Reject: чужой
+/// трафик не попадает в слот команд и НЕ продлевает dead-man таймер.
+fn parse_line(line: &str, token: &str) -> LineIn {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(line.trim()) else {
+        return LineIn::Reject;
+    };
+    if !token.is_empty() && v.get("auth").and_then(|a| a.as_str()) != Some(token) {
+        return LineIn::Reject;
+    }
+    match v.get("t").and_then(|t| t.as_str()) {
+        Some("lock") => {
+            let (Some(x), Some(y), Some(size)) = (
+                v.get("x").and_then(|f| f.as_f64()),
+                v.get("y").and_then(|f| f.as_f64()),
+                v.get("size").and_then(|f| f.as_f64()),
+            ) else {
+                return LineIn::Reject;
+            };
+            LineIn::Cmd(UiCmd::Lock { x: x as f32, y: y as f32, size: size as f32 })
+        }
+        Some("arm") => match v.get("on").and_then(|b| b.as_bool()) {
+            Some(on) => LineIn::Cmd(UiCmd::Arm { on }),
+            None => LineIn::Reject,
+        },
+        Some("stop") => LineIn::Cmd(UiCmd::Stop),
+        Some("unlock") => LineIn::Cmd(UiCmd::Unlock),
+        Some("ping") => LineIn::Ping,
+        _ => LineIn::Reject,
     }
 }
 
@@ -188,20 +220,42 @@ fn parse_cmd(line: &str) -> Option<UiCmd> {
 mod tests {
     use super::*;
 
+    fn cmd(line: &str) -> Option<UiCmd> {
+        match parse_line(line, "") {
+            LineIn::Cmd(c) => Some(c),
+            _ => None,
+        }
+    }
+
     #[test]
     fn parse_all_commands() {
         assert_eq!(
-            parse_cmd(r#"{"t":"lock","x":320.5,"y":240,"size":100}"#),
+            cmd(r#"{"t":"lock","x":320.5,"y":240,"size":100}"#),
             Some(UiCmd::Lock { x: 320.5, y: 240.0, size: 100.0 })
         );
-        assert_eq!(
-            parse_cmd(r#"{"t":"arm","on":true}"#),
-            Some(UiCmd::Arm { on: true })
-        );
-        assert_eq!(parse_cmd(r#"{"t":"stop"}"#), Some(UiCmd::Stop));
-        assert_eq!(parse_cmd(r#"{"t":"unlock"}"#), Some(UiCmd::Unlock));
-        assert_eq!(parse_cmd(r#"{"t":"ping"}"#), None);
-        assert_eq!(parse_cmd("мусор"), None);
-        assert_eq!(parse_cmd(r#"{"t":"lock","x":"строка"}"#), None);
+        assert_eq!(cmd(r#"{"t":"arm","on":true}"#), Some(UiCmd::Arm { on: true }));
+        assert_eq!(cmd(r#"{"t":"stop"}"#), Some(UiCmd::Stop));
+        assert_eq!(cmd(r#"{"t":"unlock"}"#), Some(UiCmd::Unlock));
+        assert!(matches!(parse_line(r#"{"t":"ping"}"#, ""), LineIn::Ping));
+        assert!(matches!(cmd("мусор"), None));
+        assert!(matches!(cmd(r#"{"t":"lock","x":"строка"}"#), None));
+    }
+
+    #[test]
+    fn auth_gate() {
+        // токен выключен: всё работает как раньше
+        assert!(matches!(parse_line(r#"{"t":"arm","on":true}"#, ""), LineIn::Cmd(_)));
+        // токен включен: без auth / с чужим auth — Reject
+        let t = "bench-secret";
+        assert!(matches!(parse_line(r#"{"t":"arm","on":true}"#, t), LineIn::Reject));
+        assert!(matches!(parse_line(r#"{"t":"arm","on":true,"auth":"nope"}"#, t), LineIn::Reject));
+        // с верным auth — команда доходит, ping — живость
+        assert!(matches!(
+            parse_line(r#"{"t":"arm","on":true,"auth":"bench-secret"}"#, t),
+            LineIn::Cmd(UiCmd::Arm { on: true })
+        ));
+        assert!(matches!(parse_line(r#"{"t":"ping","auth":"bench-secret"}"#, t), LineIn::Ping));
+        // чужой ping НЕ считается живостью
+        assert!(matches!(parse_line(r#"{"t":"ping","auth":"nope"}"#, t), LineIn::Reject));
     }
 }

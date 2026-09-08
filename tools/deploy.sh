@@ -4,7 +4,7 @@
 # Требуется: WSL Ubuntu с rustup (+ target aarch64), gcc-aarch64-linux-gnu,
 # /root/aarch64-libs/librknnrt.so (см. docs/HARDWARE_TEST_RESULTS §13).
 set -euo pipefail
-IP="${1:-192.168.0.225}"
+IP="${1:-192.168.0.224}"
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 
 # Путь репозитория в WSL (не зависим от того, где лежит checkout)

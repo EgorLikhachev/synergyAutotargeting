@@ -4,6 +4,7 @@
 
 mod config;
 mod control;
+mod sdnotify;
 mod diag;
 mod osd;
 mod synthetic;
@@ -529,7 +530,7 @@ impl Runner {
         let control = if cfg.control.ui_addr.is_empty() {
             None
         } else {
-            Some(std::sync::Arc::new(control::ControlLink::start(&cfg.control.ui_addr)))
+            Some(std::sync::Arc::new(control::ControlLink::start(&cfg.control.ui_addr, &cfg.control.token)))
         };
 
         // === Коммандер наведения (фаза D) ===
@@ -539,16 +540,21 @@ impl Runner {
             None
         };
 
+        // === systemd-сторож (safety_compliance §6.2): READY при старте,
+        // WATCHDOG=1 из кадровых циклов; вне systemd — no-op ===
+        let mut wd = sdnotify::SdWatchdog::from_env();
+        wd.ready();
+
         let result = if let Some(path) = self.replay.clone() {
             self.run_replay(
                 &path, self.replay_rate, &cfg, &mut hybrid, stream_ctx.as_ref(),
-                commander_ctx.as_mut(), control.as_ref(), &det_req_tx, &det_resp_rx,
+                commander_ctx.as_mut(), control.as_ref(), &mut wd, &det_req_tx, &det_resp_rx,
                 &mut stats, &mut diag,
             )
         } else if self.synthetic {
-            self.run_synthetic(&cfg, &mut hybrid, stream_ctx.as_ref(), commander_ctx.as_mut(), control.as_ref(), &det_req_tx, &det_resp_rx, &mut stats, &mut diag, deadline)
+            self.run_synthetic(&cfg, &mut hybrid, stream_ctx.as_ref(), commander_ctx.as_mut(), control.as_ref(), &mut wd, &det_req_tx, &det_resp_rx, &mut stats, &mut diag, deadline)
         } else {
-            self.run_camera(&cfg, &mut hybrid, stream_ctx.as_ref(), commander_ctx.as_mut(), control.as_ref(), &det_req_tx, &det_resp_rx, &mut stats, &mut diag, deadline)
+            self.run_camera(&cfg, &mut hybrid, stream_ctx.as_ref(), commander_ctx.as_mut(), control.as_ref(), &mut wd, &det_req_tx, &det_resp_rx, &mut stats, &mut diag, deadline)
         };
 
         // === Итоги ===
@@ -1044,6 +1050,8 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
         mut commander: Option<&mut CommanderCtx>,
         #[allow(unused_variables)]
         control: Option<&std::sync::Arc<control::ControlLink>>,
+        #[allow(unused_variables)] // тело с kick() живёт в cfg(target_os="linux")
+        wd: &mut sdnotify::SdWatchdog,
         #[allow(unused_variables)]
         det_req_tx: &std_mpsc::SyncSender<(Vec<u8>, u32, u32, u64)>,
         #[allow(unused_variables)]
@@ -1178,6 +1186,7 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
                 };
                 let dec_us = dec_t0.elapsed().as_micros() as u64;
                 fps = fps_counter.tick();
+                wd.kick(); // systemd WATCHDOG=1 (не чаще WatchdogSec/2)
                 // Периодический контроль сбойного режима 3×3 (может
                 // наступить и посреди потока, зафиксировано на железе).
                 // В аварийном режиме detile проверка отключена.
@@ -1263,6 +1272,7 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
         stream: Option<&StreamCtx>,
         mut commander: Option<&mut CommanderCtx>,
         control: Option<&std::sync::Arc<control::ControlLink>>,
+        wd: &mut sdnotify::SdWatchdog,
         det_req_tx: &std_mpsc::SyncSender<(Vec<u8>, u32, u32, u64)>,
         det_resp_rx: &std_mpsc::Receiver<Result<DetectResult, String>>,
         stats: &mut RunStats,
@@ -1287,6 +1297,7 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
             let t0 = Instant::now();
             let rgb = decode_jpeg_rgb(jpeg).context("декодирование кадра записи")?;
             fps = fps_counter.tick();
+                wd.kick(); // systemd WATCHDOG=1 (не чаще WatchdogSec/2)
             self.process_frame(
                 cfg, hybrid, stream, commander.as_deref_mut(), control, det_req_tx, det_resp_rx, stats,
                 rgb, w, h, seq as u64, fps, &mut track_ms, &mut det_ms,
@@ -1317,6 +1328,7 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
         #[allow(unused_mut)] // mut нужен linux-телу (as_deref_mut)
         mut commander: Option<&mut CommanderCtx>,
         control: Option<&std::sync::Arc<control::ControlLink>>,
+        wd: &mut sdnotify::SdWatchdog,
         det_req_tx: &std_mpsc::SyncSender<(Vec<u8>, u32, u32, u64)>,
         det_resp_rx: &std_mpsc::Receiver<Result<DetectResult, String>>,
         stats: &mut RunStats,
@@ -1367,6 +1379,7 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
             let _ = det_req_tx;
             let _ = det_resp_rx;
             fps = fps_counter.tick();
+                wd.kick(); // systemd WATCHDOG=1 (не чаще WatchdogSec/2)
             let frame_recv = Instant::now();
             self.process_frame(
                 cfg, hybrid, stream, commander.as_deref_mut(), control, det_req_tx, det_resp_rx, stats,

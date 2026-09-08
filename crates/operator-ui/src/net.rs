@@ -21,14 +21,21 @@ pub enum UiCommand {
 }
 
 impl UiCommand {
-    fn to_json(self) -> String {
+    /// `token` — общий секрет канала (safety §6.3), на пульте берётся из env
+    /// SYNERGY_TOKEN; пустая строка = аутентификация на борту выключена.
+    fn to_json(self, token: &str) -> String {
+        let auth = if token.is_empty() {
+            String::new()
+        } else {
+            format!(",\"auth\":\"{token}\"")
+        };
         match self {
             UiCommand::Lock { x, y, size } => {
-                format!("{{\"t\":\"lock\",\"x\":{x},\"y\":{y},\"size\":{size}}}\n")
+                format!("{{\"t\":\"lock\",\"x\":{x},\"y\":{y},\"size\":{size}{auth}}}\n")
             }
-            UiCommand::Arm { on } => format!("{{\"t\":\"arm\",\"on\":{on}}}\n"),
-            UiCommand::Stop => "{\"t\":\"stop\"}\n".into(),
-            UiCommand::Unlock => "{\"t\":\"unlock\"}\n".into(),
+            UiCommand::Arm { on } => format!("{{\"t\":\"arm\",\"on\":{on}{auth}}}\n"),
+            UiCommand::Stop => format!("{{\"t\":\"stop\"{auth}}}\n"),
+            UiCommand::Unlock => format!("{{\"t\":\"unlock\"{auth}}}\n"),
         }
     }
 }
@@ -449,19 +456,25 @@ fn spawn_control_listener(
                 conn2.store(false, Ordering::Relaxed);
                 eprintln!("[CONTROL] борт отключился");
             });
-            // пишем команды и ping
+            // пишем команды и ping (с общим секретом канала, если задан)
+            let token = std::env::var("SYNERGY_TOKEN").unwrap_or_default();
+            let ping: Vec<u8> = if token.is_empty() {
+                b"{\"t\":\"ping\"}\n".to_vec()
+            } else {
+                format!("{{\"t\":\"ping\",\"auth\":\"{token}\"}}\n").into_bytes()
+            };
             let mut last_ping = Instant::now();
             loop {
                 if !connected.load(Ordering::Relaxed) {
                     break;
                 }
                 while let Ok(cmd) = rx.try_recv() {
-                    if writer.write_all(cmd.to_json().as_bytes()).is_err() {
+                    if writer.write_all(cmd.to_json(&token).as_bytes()).is_err() {
                         break;
                     }
                 }
                 if last_ping.elapsed() >= Duration::from_millis(300) {
-                    if writer.write_all(b"{\"t\":\"ping\"}\n").is_err() {
+                    if writer.write_all(&ping).is_err() {
                         break;
                     }
                     last_ping = Instant::now();
@@ -530,12 +543,17 @@ mod tests {
 
     #[test]
     fn command_json_roundtrip() {
-        let l = UiCommand::Lock { x: 320.0, y: 240.0, size: 100.0 }.to_json();
+        let l = UiCommand::Lock { x: 320.0, y: 240.0, size: 100.0 }.to_json("");
         assert!(l.contains("\"t\":\"lock\""));
-        let s = UiCommand::Stop.to_json();
+        let s = UiCommand::Stop.to_json("");
         assert_eq!(s.trim(), "{\"t\":\"stop\"}");
-        let u = UiCommand::Unlock.to_json();
+        let u = UiCommand::Unlock.to_json("");
         assert_eq!(u.trim(), "{\"t\":\"unlock\"}");
+        // с общим секретом (safety §6.3) каждая команда несёт auth
+        let a = UiCommand::Arm { on: true }.to_json("bench-secret");
+        assert_eq!(a.trim(), "{\"t\":\"arm\",\"on\":true,\"auth\":\"bench-secret\"}");
+        let p = UiCommand::Stop.to_json("tok");
+        assert_eq!(p.trim(), "{\"t\":\"stop\",\"auth\":\"tok\"}");
     }
 
     #[test]
