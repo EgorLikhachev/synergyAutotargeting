@@ -33,7 +33,19 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 - ARM button 2-step confirm with 4 s auto-reset and explicit state label.
 
 ### Added
-- Board migrated to **Armbian 26.8.3 trixie vendor 6.1.115** (192.168.0.225):
+- **FC control over USB proven end-to-end (bench)**: the flight controller
+  now hangs on the ROCK 5A's USB-A via its USB-C (VCP, udev alias
+  /dev/tty-fc for 0483:5740) — zero FC-side config needed (VCP ships with
+  MSP). commander streams SET_RAW_RC (38 B, ~23-30 Hz, throttle 1310 /
+  arm-aux 1950 verified by strace); the FC applies the frames (verified by
+  direct MSP_RC readback). UART wiring stays a field-phase task.
+- Autonomous debugging rig: tools/ui_sim.py (headless operator-UI
+  simulator over the real push channels :9000/:9010 with keep-alive pings,
+  scripted arm/stop/lock/unlock), tools/fc_rcpeek.sh (MSP_RC peek),
+  tools/fc_wpos.sh (commander fd probe); strace write-interception
+  methodology documented in CURRENT_STATE.
+- Board migrated to **Armbian 26.8.3 trixie vendor 6.1.115** (192.168.0.224
+  via router DHCP lease):
   provisioning scripts (tools/armbian_provision.sh, armbian_step2.sh),
   in-tree gspca_ov534 (no out-of-tree build), librknnrt installed manually,
   UART7 overlay via armbianEnv.txt, service autostart, both cameras with

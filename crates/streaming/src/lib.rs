@@ -105,8 +105,18 @@ impl MjpegPusher {
             .name("mjpeg-push".into())
             .spawn(move || {
                 eprintln!("[MJPEG-PUSH] запущен, цель {addr}");
+                let sa: std::net::SocketAddr = match addr.parse() {
+                    Ok(v) => v,
+                    Err(_) => {
+                        eprintln!("[MJPEG-PUSH] некорректный адрес {addr}");
+                        return;
+                    }
+                };
                 loop {
-                    if let Ok(mut s) = TcpStream::connect(&addr) {
+                    // connect_timeout: иначе блокирующий connect держит поток
+                    // ~2 мин и не даёт быстро переподключиться к зрителю.
+                    let tcp = TcpStream::connect_timeout(&sa, std::time::Duration::from_secs(2));
+                    if let Ok(mut s) = tcp {
                         let _ = s.set_nodelay(true);
                         let head = b"HTTP/1.0 200 OK\r\n\
                                      Content-Type: multipart/x-mixed-replace; boundary=frame\r\n\

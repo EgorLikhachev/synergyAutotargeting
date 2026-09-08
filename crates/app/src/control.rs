@@ -62,8 +62,18 @@ impl ControlLink {
             .name("ui-control".into())
             .spawn(move || {
                 eprintln!("[UI-CTRL] запущен, цель {addr}");
+                let sa: std::net::SocketAddr = match addr.parse() {
+                    Ok(v) => v,
+                    Err(_) => {
+                        eprintln!("[UI-CTRL] некорректный адрес {addr}");
+                        return;
+                    }
+                };
                 loop {
-                    if let Ok(mut sock) = TcpStream::connect(&addr) {
+                    // connect_timeout: блокирующий connect при мёртвом зрителе
+                    // висит ~2 мин и не даёт быстро переподключиться.
+                    let sock = TcpStream::connect_timeout(&sa, Duration::from_secs(2));
+                    if let Ok(mut sock) = sock {
                         let _ = sock.set_nodelay(true);
                         let _ = sock.set_read_timeout(Some(Duration::from_millis(50)));
                         let _ = sock.write_all(b"{\"t\":\"hello\"}\n");
