@@ -33,6 +33,13 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 - ARM button 2-step confirm with 4 s auto-reset and explicit state label.
 
 ### Added
+- Tiled 2×2 inference for small targets (ADR-022, R2): implemented
+  (tiles/crop/remap/merge-NMS + `tiled_lost` gating when no track is
+  active), measured on the 9-video day reference set, and **disabled by
+  default** — no gain with the current model (det-on-target 162→131,
+  track-on-target 1140→916): ×2 resolution is not enough for untrained
+  7×4 px targets and the ×4 NPU cost slows reacquisition. Retraining (R1)
+  remains the confirmed path; the infrastructure stays tested and ready.
 - FC telemetry in the UI status (ADR-021): commander now reads MSP replies
   (reader thread + 2 Hz MSP_STATUS/MSP_RC polling over the same port) and
   publishes `fc {online, rx_ok, flags, ch}` — the operator sees the

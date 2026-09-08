@@ -14,6 +14,10 @@ model_path = "models/model_5_dynamic_rk3588.rknn"
 input_size = 640
 conf_threshold = 0.45
 nms_threshold = 0.45
+# Тайл-инференс 2x2 при отсутствии трека (ADR-022). Измерено на эталоне:
+# с текущей моделью выигрыша НЕТ (см. RESULTS «R2-эксперимент»), дефолт выкл;
+# имеет смысл вернуть после дообучения модели на мелких целях (R1).
+tiled_lost = false
 # Имена классов заполняются после эмпирической проверки модели (см. docs/HARDWARE_TEST_RESULTS.md)
 class_names = []
 

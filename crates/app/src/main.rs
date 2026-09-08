@@ -508,7 +508,8 @@ impl Runner {
         };
 
         // === Детектор ===
-        let (det_req_tx, det_req_rx) = std_mpsc::sync_channel::<(Vec<u8>, u32, u32, u64)>(1);
+        let (det_req_tx, det_req_rx) =
+            std_mpsc::sync_channel::<(Vec<u8>, u32, u32, u64, bool)>(1);
         let (det_resp_tx, det_resp_rx) = std_mpsc::sync_channel::<Result<DetectResult, String>>(1);
         let det_handle = self.spawn_detector(&cfg, det_req_rx, det_resp_tx)?;
 
@@ -620,7 +621,7 @@ impl Runner {
     fn spawn_detector(
         &self,
         cfg: &AppConfig,
-        req_rx: std_mpsc::Receiver<(Vec<u8>, u32, u32, u64)>,
+        req_rx: std_mpsc::Receiver<(Vec<u8>, u32, u32, u64, bool)>,
         resp_tx: std_mpsc::SyncSender<Result<DetectResult, String>>,
     ) -> Result<Option<std::thread::JoinHandle<()>>> {
         #[cfg(feature = "npu")]
@@ -676,17 +677,41 @@ impl Runner {
                         classes = decoder.num_classes,
                         "декодер YOLOv8 готов"
                     );
-                    while let Ok((rgb, w, h, seq)) = req_rx.recv() {
-                        tracing::debug!(seq, "детектор получил запрос");
+                    while let Ok((rgb, w, h, seq, tiled)) = req_rx.recv() {
+                        tracing::debug!(seq, tiled, "детектор получил запрос");
                         let t0 = Instant::now();
                         // Паника в инференсе/декоде не должна молча убивать
                         // воркер (диагностика 2026-09-01): ловим и отвечаем Err.
                         let lb_w = model.input_w.max(1);
                         let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                            let (letterboxed, lb) = detector::letterbox_rgb24(&rgb, w, h, lb_w);
-                            let outputs = model.infer(&letterboxed).map_err(|e| e.to_string())?;
-                            let dets = decoder.decode(&outputs, &dims, &lb, w, h, seq);
-                            Ok::<_, String>((dets, t0.elapsed().as_micros() as f32 / 1000.0))
+                            let (dets, infer_ms) = if tiled {
+                                // ADR-022 (R2): 2×2 перекрывающихся тайла,
+                                // каждый в свой letterbox; детекции ->
+                                // координаты кадра -> NMS-мердж на стыках.
+                                let mut all = Vec::new();
+                                let mut ms = 0.0f32;
+                                for t in detector::tiles_2x2(w, h) {
+                                    let crop = detector::crop_rgb24(&rgb, w, t);
+                                    let (letterboxed, lb) =
+                                        detector::letterbox_rgb24(&crop, t.w, t.h, lb_w);
+                                    let t1 = Instant::now();
+                                    let outputs =
+                                        model.infer(&letterboxed).map_err(|e| e.to_string())?;
+                                    ms += t1.elapsed().as_secs_f32() * 1000.0;
+                                    for d in decoder.decode(&outputs, &dims, &lb, t.w, t.h, seq) {
+                                        all.push(detector::det_to_frame(d, t));
+                                    }
+                                }
+                                (detector::nms_merge(all, nms), ms)
+                            } else {
+                                let (letterboxed, lb) =
+                                    detector::letterbox_rgb24(&rgb, w, h, lb_w);
+                                let outputs =
+                                    model.infer(&letterboxed).map_err(|e| e.to_string())?;
+                                let dets = decoder.decode(&outputs, &dims, &lb, w, h, seq);
+                                (dets, t0.elapsed().as_secs_f32() * 1000.0)
+                            };
+                            Ok::<_, String>((dets, infer_ms))
                         }));
                         match res {
                             Ok(Ok((dets, infer_ms))) => {
@@ -730,7 +755,7 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
         #[allow(unused_mut)] // mut нужен linux-телу (as_deref_mut)
         mut commander: Option<&mut CommanderCtx>,
         control: Option<&std::sync::Arc<control::ControlLink>>,
-        det_req_tx: &std_mpsc::SyncSender<(Vec<u8>, u32, u32, u64)>,
+        det_req_tx: &std_mpsc::SyncSender<(Vec<u8>, u32, u32, u64, bool)>,
         det_resp_rx: &std_mpsc::Receiver<Result<DetectResult, String>>,
         stats: &mut RunStats,
         mut rgb: Vec<u8>,
@@ -809,8 +834,11 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
         }
 
         // 1) Отправить кадр на детекцию, если пора и детектор свободен.
+        // ADR-022: без активного трека — тайлы 2×2 (мелкие цели ×2 разрешение),
+        // пока трек жив — дешёвая полнокадровая.
         if !self.demo_detect && hybrid.wants_detection(seq) && !hybrid.detect_inflight {
-            if det_req_tx.try_send((rgb.clone(), w, h, seq)).is_ok() {
+            let tiled = cfg.detector.tiled_lost && !hybrid.is_tracking();
+            if det_req_tx.try_send((rgb.clone(), w, h, seq, tiled)).is_ok() {
                 hybrid.detect_inflight = true;
                 stats.detections_run += 1;
             }
@@ -1071,7 +1099,7 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
         #[allow(unused_variables)] // тело с kick() живёт в cfg(target_os="linux")
         wd: &mut sdnotify::SdWatchdog,
         #[allow(unused_variables)]
-        det_req_tx: &std_mpsc::SyncSender<(Vec<u8>, u32, u32, u64)>,
+        det_req_tx: &std_mpsc::SyncSender<(Vec<u8>, u32, u32, u64, bool)>,
         #[allow(unused_variables)]
         det_resp_rx: &std_mpsc::Receiver<Result<DetectResult, String>>,
         #[allow(unused_variables)]
@@ -1291,7 +1319,7 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
         mut commander: Option<&mut CommanderCtx>,
         control: Option<&std::sync::Arc<control::ControlLink>>,
         wd: &mut sdnotify::SdWatchdog,
-        det_req_tx: &std_mpsc::SyncSender<(Vec<u8>, u32, u32, u64)>,
+        det_req_tx: &std_mpsc::SyncSender<(Vec<u8>, u32, u32, u64, bool)>,
         det_resp_rx: &std_mpsc::Receiver<Result<DetectResult, String>>,
         stats: &mut RunStats,
         diag: &mut diag::DiagSink,
@@ -1347,7 +1375,7 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
         mut commander: Option<&mut CommanderCtx>,
         control: Option<&std::sync::Arc<control::ControlLink>>,
         wd: &mut sdnotify::SdWatchdog,
-        det_req_tx: &std_mpsc::SyncSender<(Vec<u8>, u32, u32, u64)>,
+        det_req_tx: &std_mpsc::SyncSender<(Vec<u8>, u32, u32, u64, bool)>,
         det_resp_rx: &std_mpsc::Receiver<Result<DetectResult, String>>,
         stats: &mut RunStats,
         diag: &mut diag::DiagSink,

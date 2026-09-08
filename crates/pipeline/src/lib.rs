@@ -148,6 +148,12 @@ impl HybridTracker {
         !self.auto_acquire
     }
 
+    /// Активный трек (для гейтинга тайл-инференса ADR-022: пока трек жив —
+    /// дешёвая полнокадровая детекция; потеряли — zoom-тайлы за ×4 NPU).
+    pub fn is_tracking(&self) -> bool {
+        self.auto_acquire && self.last_bbox.is_some() && self.tracker.is_initialized()
+    }
+
     /// Подать результаты детекции (вызываются когда детектор ответил).
     /// `frame` нужен для реинициализации трекера.
     pub fn on_detection(

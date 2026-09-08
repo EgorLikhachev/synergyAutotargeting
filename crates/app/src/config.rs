@@ -48,11 +48,18 @@ pub struct DetectorConfig {
     pub class_names: Vec<String>,
     /// Пер-класс пороги {class_id: conf}; класс без записи — conf_threshold.
     pub class_thresholds: std::collections::HashMap<u32, f32>,
+    /// Тайл-инференс 2×2 при отсутствии активного трека (ADR-022). Измерено
+    /// на эталоне 2026-09-08: с ТЕКУЩЕЙ моделью выигрыша нет (дет-цель
+    /// 162→131, трек-цель 1140→916) — цели 7×4 px не в трейне и ×2
+    /// разрешения модели недостаточно, а ×4 NPU режет частоту ре-захвата.
+    /// Дефолт выкл; вернуть после R1 (дообучение на мелких целях).
+    pub tiled_lost: bool,
 }
 
 impl Default for DetectorConfig {
     fn default() -> Self {
         Self {
+            tiled_lost: false,
             model_path: "models/model_5_dynamic_rk3588.rknn".into(),
             input_size: 640,
             conf_threshold: 0.45,

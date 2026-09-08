@@ -443,6 +443,76 @@ pub fn chrono_now_ms() -> u64 {
         .unwrap_or(0)
 }
 
+
+/// Геометрия тайла для zoom-инференса мелких целей (R2 из refvideo/RESULTS,
+/// ADR-022): 2×2 перекрывающихся тайла, ~10 % перекрытия — цель 7×4 px
+/// превращается в ~14×8 px на входе модели.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Tile {
+    pub x: u32,
+    pub y: u32,
+    pub w: u32,
+    pub h: u32,
+}
+
+/// Тайлы 2×2 с перекрытием ~10 % по каждой оси (для 640×480:
+/// 352×264 с шагом 288/216). Кадры меньше 2×32 — один тайл на весь кадр.
+pub fn tiles_2x2(w: u32, h: u32) -> Vec<Tile> {
+    if w < 64 || h < 64 {
+        return vec![Tile { x: 0, y: 0, w, h }];
+    }
+    let tile_w = ((w as u32 * 11) / 20).max(32); // ~55 %
+    let tile_h = ((h as u32 * 11) / 20).max(32);
+    let tile_w = tile_w.min(w);
+    let tile_h = tile_h.min(h);
+    let stride_x = w - tile_w;
+    let stride_y = h - tile_h;
+    let mut out = Vec::with_capacity(4);
+    for ty in [0, stride_y] {
+        for tx in [0, stride_x] {
+            out.push(Tile { x: tx, y: ty, w: tile_w, h: tile_h });
+        }
+    }
+    out
+}
+
+/// Кроп под-прямоугольника из interleaved RGB24.
+pub fn crop_rgb24(rgb: &[u8], w: u32, t: Tile) -> Vec<u8> {
+    let mut out = Vec::with_capacity((t.w * t.h * 3) as usize);
+    for row in 0..t.h {
+        let src = (((t.y + row) * w + t.x) as usize) * 3;
+        let src = src.min(rgb.len().saturating_sub((t.w as usize) * 3));
+        out.extend_from_slice(&rgb[src..src + (t.w as usize) * 3]);
+    }
+    out
+}
+
+/// Сдвиг детекции из координат тайла в координаты кадра.
+pub fn det_to_frame(mut d: common::Detection, t: Tile) -> common::Detection {
+    d.bbox.x += t.x as f32;
+    d.bbox.y += t.y as f32;
+    d
+}
+
+/// NMS по классам и IoU; вход сортируется по уверенности.
+pub fn nms_merge(
+    dets: Vec<common::Detection>,
+    iou_th: f32,
+) -> Vec<common::Detection> {
+    let mut dets = dets;
+    dets.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap_or(std::cmp::Ordering::Equal));
+    let mut kept: Vec<common::Detection> = Vec::new();
+    'outer: for d in dets {
+        for k in &kept {
+            if k.class_id == d.class_id && k.bbox.iou(&d.bbox) > iou_th {
+                continue 'outer;
+            }
+        }
+        kept.push(d);
+    }
+    kept
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -544,5 +614,69 @@ mod tests {
         assert_eq!(lb.pad_y, 0.0);
         // Все пиксели из источника (без заполнения 114).
         assert!(out.iter().all(|&v| v == 200));
+    }
+    #[test]
+    fn tiles_cover_frame_with_overlap() {
+        let ts = tiles_2x2(640, 480);
+        assert_eq!(ts.len(), 4);
+        // правый нижний угол покрыт
+        let br = ts.iter().map(|t| (t.x + t.w, t.y + t.h)).max().unwrap();
+        assert_eq!(br, (640, 480));
+        // перекрытие ~10 % по обеим осям (тип 352 -> 64 px, 264 -> 48 px)
+        assert_eq!(ts[0].w - (ts[1].x - ts[0].x), 64);
+        assert_eq!(ts[0].h - (ts[2].y - ts[0].y), 48);
+        // мелкий кадр — один тайл
+        assert_eq!(tiles_2x2(32, 32).len(), 1);
+    }
+
+    #[test]
+    fn crop_and_remap_roundtrip() {
+        // кадр 64x48, тайл 36x28 с шагом 28/20; белый квадрат в правом нижнем
+        let (w, h) = (64u32, 48u32);
+        let mut rgb = vec![0u8; (w * h * 3) as usize];
+        for y in 40..44 {
+            for x in 56..60 {
+                for c in 0..3 {
+                    rgb[((y * w + x) * 3 + c) as usize] = 255;
+                }
+            }
+        }
+        let ts = tiles_2x2(w, h);
+        let t = *ts.last().unwrap(); // правый нижний тайл
+        let crop = crop_rgb24(&rgb, w, t);
+        assert_eq!(crop.len(), (t.w * t.h * 3) as usize);
+        // квадрат (56,40)-(60,44) внутри тайла -> локальные (56-t.x, 40-t.y)
+        let lx = (56 - t.x) as usize;
+        let ly = (40 - t.y) as usize;
+        let cx = (ly * t.w as usize + lx) * 3;
+        assert_eq!(&crop[cx..cx + 3], &[255, 255, 255]);
+        // детекция из тайла -> координаты кадра
+        let d = common::Detection {
+            bbox: BBox::new(lx as f32, ly as f32, 4.0, 4.0),
+            class_id: 0,
+            class_name: "t".into(),
+            confidence: 0.9,
+            frame_seq: 1,
+            detected_at_ms: 0,
+        };
+        let fd = det_to_frame(d, t);
+        assert_eq!((fd.bbox.x as u32, fd.bbox.y as u32), (56, 40));
+    }
+
+    #[test]
+    fn nms_merge_dedups_overlap() {
+        let mk = |x: f32, c: f32| common::Detection {
+            bbox: BBox::new(x, 0.0, 10.0, 10.0),
+            class_id: 0,
+            class_name: "t".into(),
+            confidence: c,
+            frame_seq: 1,
+            detected_at_ms: 0,
+        };
+        let merged = nms_merge(vec![mk(0.0, 0.5), mk(1.0, 0.9), mk(60.0, 0.3)], 0.45);
+        assert_eq!(merged.len(), 2);
+        assert_eq!(merged[0].confidence, 0.9); // сильнейший выжил
+        let merged2 = nms_merge(vec![mk(0.0, 0.5), mk(60.0, 0.9)], 0.45);
+        assert_eq!(merged2.len(), 2); // дальние не сливаются
     }
 }
