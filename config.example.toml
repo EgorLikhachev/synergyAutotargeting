@@ -62,6 +62,9 @@ record = ""                # запись стрима в M-JPEG файл (пу�
 [commander]
 enabled = false            # контур наведения (фаза D)
 device = "/dev/ttyS7"      # UART полётника (UART7, пины 22/33 — docs/wiring_gep_f405.md); нет устройства → noop+WARN
+# На стороне FC (Betaflight 4.4) обязательно: MSP на ЭТОМ UART + feature
+# RX_MSP; MSP максимум на VCP+2 UART (MAX_MSP_PORT_COUNT=3) — больше молча
+# сбрасывается при загрузке. Настройка: tools/fc_setports.py (COM4, USB).
 baud = 115200
 rate_hz = 30               # частота RC-кадров
 # Стартовые коэффициенты — свип на симуляторе (examples/tune.rs, 2026-09-07):

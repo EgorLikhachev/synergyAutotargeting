@@ -1,48 +1,66 @@
-# Текущее состояние (обновлено: 2026-09-04, ночная смена)
+# Текущее состояние (обновлено: 2026-09-08)
+
+## Железо/среда
+- Борт: **ROCK 5A, Armbian 26.8.3 trixie vendor 6.1.115**, 192.168.0.225
+  (radxa/radxa, NOPASSWD sudo, ssh-ключи). gspca_ov534 in-tree,
+  librknnrt 2.3.0 вручную в /usr/lib/aarch64-linux-gnu/, overlay
+  rk3588-uart7-m2 через /boot/armbianEnv.txt, systemd synergy.service.
+- Камеры: PS Eye `/dev/video-pseye` (1415:2000) + Arducam
+  `/dev/video-arducam` (0c45:6366) — udev-алиасы обеим.
+- FC: **GEPRC TAKER F405 BLS 60A V2 STACK** (полётник GEP-F405-HD V3),
+  Betaflight 4.4.3 GEPRCF405, подключён по USB к ПК (COM4, VCP) и тремя
+  проводами к гребёнке ROCK (пины 22/33/6). Configurator держит COM4
+  эксклюзивно — для наших MSP-скриптов его отключать.
 
 ## Что работает (доказано на железе)
-- Гибрид C: камера **PS Eye** `/dev/video-pseye` (udev-алиас VID:PID
-  1415:2000), GRBG 640×480 **60 FPS**; детекция YOLOv8 NPU core0 (32 мс @640),
-  трекинг NanoTrack NPU core1 (**6.2 мс**), e2e кадр→бокс **10.6 мс**.
-- Стрим OSD push (борт→UI, :9000) + канал управления (:9010, JSON-строки,
-  ADR-016): lock/arm/**stop/unlock**/ping; режимы TRACK/ACQUIRE/LOST/**IDLE**.
-- Операторский UI (crates/operator-ui, egui): видео+оверлеи, двойной клик =
-  захват, «× СНЯТЬ ЗАХВАТ», АРМ в 2 клика (4 с автосброс), СТОП,
-  **запись .mjpg** (durable: flush 1 с, стоп с джойном писателя),
-  горячие клавиши Esc/F/R, живой заголовок окна, «Папка записей».
-- Коммандер: MSP v1 SET_RAW_RC поверх UART, валидирован на симуляторе;
-  схема подключения полётника готова — docs/wiring_gep_f405.md
-  (GEP-F405-HD V3 → UART7 пины 22/33, /dev/ttyS7, overlay uart7-m2).
-- Устойчивость: камера недоступна → retry внутри процесса (не краш-луп;
-  инцидент 2026-09-04: 129 рестартов уронили сеть на часы), RestartSec=10.
-- Валидация на эталонных видео: 18 роликов через реальный NPU, скоринг
-  против GT — refvideo/RESULTS.md (трекер ×5-7 покрытия, медиана 7-15 px;
-  детектор 3-8% на целях 7×4 px; тепловизор разделяется по conf ≈0.45).
-- Деплой: tools/deploy.sh (WSL кросс-сборка + glibc-strip + unit-файл),
-  systemd synergy.service автозапуск.
+- Гибрид C: PS Eye GRBG 640×480 **60 FPS**; детекция YOLOv8 NPU core0
+  (32 мс @640), трекинг NanoTrack NPU core1 (**6.2 мс**), e2e кадр→бокс
+  **10.6 мс**.
+- Стрим OSD push (:9000) + канал управления (:9010, ADR-016):
+  lock/arm/**stop/unlock**/ping; режимы TRACK/ACQUIRE/LOST/**IDLE**.
+- Операторский UI (egui): двойной клик = захват, «× СНЯТЬ ЗАХВАТ», АРМ в
+  2 клика, запись .mjpg (durable), горячие клавиши Esc/F/R, «Папка записей».
+- Валидация на эталонных видео: refvideo/RESULTS.md.
+- Деплой: tools/deploy.sh (WSL кросс-сборка + glibc-strip + unit),
+  дефолтный IP .225.
+- Устойчивость: retry камеры внутри процесса, RestartSec=10.
 
-## Ключевые файлы
-- crates/{common,capture,rknn-sys,detector,nano-track,pipeline,streaming,
-  commander,app,operator-ui} — 10 крейтов
-- models/: .onnx (tract) + .rknn (int8 mmse); refvideo/: GT + скрипты
-- tools/: viewer.py, deploy.sh, bench.sh, synergy.service
-- docs/: SDD-SPEC, ROADMAP, HARDWARE_TEST_RESULTS, safety_compliance,
-  wiring_gep_f405, sdd/decisions (ADR-001..018-a)
+## FC-интеграция (сессия 09-05..09-08)
+- **Корневая причина «serial не сохраняется» найдена:** BF 4.4 при каждой
+  загрузке сбрасывает ТОЛЬКО serialConfig, если isSerialConfigValid() не
+  проходит: `MAX_MSP_PORT_COUNT=3` (VCP считается и обязан иметь MSP).
+  Валидный конфиг = MSP на VCP + 2 UART. Валидный конфиг персистентен
+  (проверено после ребута), `feature RX_MSP` персистентен.
+- Доказано: борт/пины 22/33/кабель целы насквозь (дальнее эхо 29/30);
+  все 6 UART FC проверены и как MSP-приёмники (молчание), и как
+  передатчики LTM/MAVLink (0 байт на борт).
+- **Единственное, что осталось:** текущие точки пайки на FC — не RX/TX
+  ни одного UART (или холодная пайка, или земля не на G). Ждём от
+  заказчика подписи падов → перенос пайки на пару `T<n>/R<n>` →
+  `fc_finduart.py` закрывает связь → тест каналов при ARM
+  (MSP_RC: центры 1500, ch3=1310, ch4=1950).
 
 ## Грабли (не повторять)
-- librknnrt 2.3.0: float-входы мульти-входовых графов — NHWC (ADR-011);
-  fp16 неточен; opt=3 портит fusion; zero-copy → SIGSEGV в DRM (ADR-006).
-- «Кадр 3×3» был багом НАШЕГО JPEG-энкодера (планарный буфер в
-  interleaved-кодер), камеры невиновны — ADR-018-a; защита оставлена.
-- Входящие TCP к user-портам при активном NPU не проходят (ADR-009);
-  при зависании ядра ARP ещё отвечает — не путать с «живым» бортом.
+- **BF 4.4: не ставить MSP больше чем на VCP+2 UART** — молчаливый сброс
+  serialConfig при каждой загрузке (выглядит как «не сохраняется»).
+- **CLI Configurator: вставка блока ломает хвостовой `save`** (баг #5127,
+  «ave» вместо save) — набирать save руками, проверять `serial` до и после.
+- **Armbian: overlays только через /boot/armbianEnv.txt** — правка
+  extlinux.conf убила загрузку (перепрошивка!).
+- UART-порты FC открываются ТОЛЬКО при загрузке: runtime-изменение
+  serialConfig невидимо до ребута (не «оживляй» конфиг без перезагрузки).
+- Тесты UART на борте: писать в порт паттерном `printf > /dev/ttyS7` в
+  фоне + `cat` — вариант с exec-fd и фоновым писателем молча не передаёт.
+- librknnrt 2.3.0: NHWC у float-входов, fp16 неточен, opt=3 портит
+  fusion, zero-copy → SIGSEGV (ADR-006/011).
+- Входящие TCP к user-портам при активном NPU могут не проходить (ADR-009);
+  ARP-ответ ≠ живой sshd.
+- UVC пере-enumeration меняет /dev/videoN — только udev-алиасы.
 - Windows: `ssh -f` умирает; git pull на борту сломан — доставка deploy.sh.
-- UVC/ov534 пере enumeration меняет /dev/videoN — только udev-алиас.
 
 ## Следующие шаги
-1. Физическая сборка FC↔ROCK 5A по wiring-доке: overlay uart7-m2,
-   конфиг commander на /dev/ttyS7, тест каналов MSP в Betaflight.
+1. Подписи падов FC от заказчика → перенос пайки → fc_finduart → `$M>` →
+   MSP_RC при ARM → моторы без пропов (чеклист в wiring_gep_f405.md §9).
 2. Ретест UI заказчиком: АРМ/fail-safe/unlock/запись в поле.
-3. Безопасность (из safety_compliance): WatchdogSec+sd_notify, токен
-   канала, авто-разарм при длительном LOST.
-4. Детектор на мелких целях: дообучение/tile-инференс (refvideo/RESULTS R1-R2).
+3. Безопасность (safety_compliance): WatchdogSec+sd_notify, токен канала.
+4. Детектор мелких целей: дообучение/tile-инференс (RESULTS R1-R2).

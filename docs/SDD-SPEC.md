@@ -30,7 +30,12 @@ crates/
   pipeline    — HybridTracker: правила гибрида C, режимы Tracking/
                 DetectAcquire/Lost/Idle (unlock)
   streaming   — MJPEG сервер + push (борт→зритель, ADR-009)
-  commander   — закон наведения + MSP v1 по UART (ADR-012)
+  commander   — закон наведения + MSP v1 по UART (ADR-012); на стороне FC
+                действует ограничение Betaflight 4.4: MSP максимум на
+                VCP+2 UART (MAX_MSP_PORT_COUNT=3, иначе serialConfig молча
+                сбрасывается при каждой загрузке) + feature RX_MSP;
+                настройка и диагностика — tools/fc_*.py (см.
+                docs/wiring_gep_f405.md §3, §5)
   app         — CLI synergy: конфиг, потоки, OSD, телеметрия, replay
   operator-ui — операторский egui-пульт (ADR-016): видео, захват,
                 АРМ/СТОП/снять захват, запись .mjpg

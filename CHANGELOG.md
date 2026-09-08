@@ -7,6 +7,20 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- FC serial config "not saving" root cause found and fixed: Betaflight 4.4
+  `validateAndFixConfig()` silently resets **only the serialConfig group**
+  on every boot when `isSerialConfigValid()` fails — MSP is capped at
+  `MAX_MSP_PORT_COUNT = 3` (VCP counts and must keep MSP), so "MSP on all
+  six UARTs" is invalid and was wiped each reboot while EEPROM itself
+  wrote fine (features/craft_name persisted — which made it look like a
+  flash/paste problem). Valid config: MSP on VCP + 2 UART.
+- Board-recovery lesson locked into docs: on Armbian, overlays go to
+  `/boot/armbianEnv.txt` (`overlays=rk3588-uart7-m2`), never to
+  extlinux.conf (a Radxa-Debian edit there bricked the boot, 2026-09-05).
+- far_loop.sh: the `exec 3<>` + background-writer pattern never actually
+  transmitted; replaced with the proven direct-write pattern (`printf >
+  DEV` loop + `cat DEV`) — the far-end cable loopback then echoed 29/30
+  markers.
 - Stream 3x3 grid root cause: planar RGB buffer fed to interleaved JPEG
   encoder — cameras were innocent (ADR-018-a).
 - Operator UI no longer exits on torn GRBG/MJPEG frames (skipped with warn).
@@ -19,6 +33,25 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 - ARM button 2-step confirm with 4 s auto-reset and explicit state label.
 
 ### Added
+- Board migrated to **Armbian 26.8.3 trixie vendor 6.1.115** (192.168.0.225):
+  provisioning scripts (tools/armbian_provision.sh, armbian_step2.sh),
+  in-tree gspca_ov534 (no out-of-tree build), librknnrt installed manually,
+  UART7 overlay via armbianEnv.txt, service autostart, both cameras with
+  udev aliases (/dev/video-pseye, /dev/video-arducam).
+- FC MSP integration toolchain (PC side over COM4, Configurator must be
+  disconnected): msp_query.py (status/rc), fc_cli.py, fc_setports.py
+  (apply serial config with acks + **post-reboot verification**, 4 retries),
+  fc_finduart.py (permutations of valid UART pairs + `$M>` probe from the
+  board), fc_txtest.py (reverse path FC→board via LTM/MAVLink telemetry
+  transmitters, port isolation, final MSP config).
+- Board-side UART diagnostics (run over ssh, auto stop/start synergy):
+  msp_probe_board.sh (MSP_STATUS probe), listen_board.sh (byte counter +
+  hex dump), far_loop.sh (far-end cable loopback echo).
+- FC identified precisely: GEPRC TAKER F405 BLS 60A V2 stack, FC
+  GEP-F405-HD V3, Betaflight 4.4.3 target GEPRCF405; UART/pin map from a
+  live resource dump added to the wiring doc along with the proof table
+  (board/cable/pins proven end-to-end; FC-side attachment points still
+  pending pad labels).
 - Sony PS Eye support: out-of-tree ov534/gspca driver build, GRBG Bayer
   format + demosaic, 640x480@60 verified.
 - Operator UI: video recording to .mjpg (replay-compatible, durable

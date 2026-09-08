@@ -32,7 +32,7 @@ UART). The runtime is **100% Rust** — no Python or C++ in the pipeline.
 | Tool | Version | Needed for |
 |---|---|---|
 | Rust toolchain | 1.75+ (`rustup`) | building, tests |
-| Linux (aarch64) | vendor Debian on ROCK 5A | NPU + camera runtime |
+| Linux (aarch64) | Armbian trixie (vendor 6.1.115) on ROCK 5A | NPU + camera runtime |
 | `libudev-dev`, `pkg-config` | apt | `serialport` crate on the board |
 | Python 3 | 3.10+ | optional host-side tools (viewer, telemetry report) |
 | WSL2 Ubuntu + `gcc-aarch64-linux-gnu` | any | optional: cross-compilation |
@@ -78,7 +78,7 @@ The app reads `config.toml` (copy from `config.example.toml`). Main sections:
 | `[pipeline]` | `detect_every_n=10`, `iou_confirm=0.30`, `lost_patience=3`, `gmc=false` | hybrid logic; `gmc` enables digital stabilization for hard-mounted cameras |
 | `[output]` | `dir="data"`, `snapshot_every=30`, `telemetry=true`, `duration_secs=0` | snapshots (`data/frame_XXXXXX.jpg`), JSONL telemetry |
 | `[stream]` | `enabled=false`, `bind="0.0.0.0:8080"`, `push_to=""`, `frame_div=2`, `quality=80`, `record=""`, `record_h264=""` | MJPEG OSD streaming and recording |
-| `[commander]` | `enabled=false`, `device="/dev/ttyS7"`, `baud=115200`, `rate_hz=30`, `kp/ki/kd`, `lead_s=0.0`, `swap_axes=false` | aiming loop: pixel error → PID → MSP RC channels over UART |
+| `[commander]` | `enabled=false`, `device="/dev/ttyS7"`, `baud=115200`, `rate_hz=30`, `kp/ki/kd`, `lead_s=0.0`, `swap_axes=false` | aiming loop: pixel error → PID → MSP RC channels over UART; the FC side needs MSP on that UART + `feature RX_MSP` (Betaflight caps MSP at VCP + 2 UART — see docs/wiring_gep_f405.md §3) |
 | `[synthetic]` | `shake_px=0.0` | camera-shake simulation for stabilization testing |
 
 Environment variables:
@@ -166,7 +166,10 @@ crates/
                unlock (IDLE), .mjpg recording, hotkeys Esc/F/R
 models/        ONNX (CPU) and RKNN (NPU int8) model files
 tools/         viewer.py, telemetry_report.py, bench.sh, deploy.sh,
-               model conversion scripts, systemd unit
+               model conversion scripts, systemd unit,
+               FC integration over MSP (fc_setports/fc_finduart/fc_txtest,
+               msp_query) and board-side UART diagnostics (msp_probe_board,
+               listen_board, far_loop)
 docs/          SDD spec, ADR journal, hardware test results, roadmap (Russian);
                safety audit, FC wiring (GEP-F405-HD V3 -> UART7)
 refvideo/      reference-video validation vs ground truth (RESULTS.md)
