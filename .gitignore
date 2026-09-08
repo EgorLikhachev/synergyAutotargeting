@@ -35,3 +35,7 @@ pseye/*.ko
 dist/
 refvideo/runs_board/
 *.bin
+
+# python-артефакты FC-инструментов
+__pycache__/
+*.pyc
