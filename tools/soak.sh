@@ -6,6 +6,7 @@
 # Лог: ~/synergy/data/soak_$(date +%Y%m%d_%H%M).log
 set -u
 HOURS="${1:-8}"
+HOURS=$(( ${HOURS%.*} ))  # bash-арифметика целочисленная: 7.5 -> 7
 OUT="$HOME/synergy/data/soak_$(date +%Y%m%d_%H%M).log"
 mkdir -p "$(dirname "$OUT")"
 END=$((SECONDS + HOURS * 3600))
