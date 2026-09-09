@@ -18,6 +18,11 @@ for f in data/refvideo/*.mjpg; do
     echo "--- $name"
     ./target/release/synergy --config config.toml --diag --replay "$f" --replay-rate 0 \
         --output "data/replay_runs/$name" 2>&1 | tail -3
+    # Пауза между NPU-сессиями: частые init/teardown rknpu расшатывают
+    # vendor-ядро (жёсткое зависание 2026-09-08 18:00 после ~20 рестартов
+    # за день — журнал обрывается на старте synergy). Батч >10 прогонов —
+    # после него плановый ребут борд'а.
+    sleep 10
 done
 
 echo "== 3/3 готово: $(ls data/replay_runs | wc -l) прогонов"
