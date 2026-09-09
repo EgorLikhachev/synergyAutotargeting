@@ -26,7 +26,10 @@ while [ $SECONDS -lt $END ]; do
     wd_new=" stalled"
     [ "$wd" != "$last_wd" ] && wd_new=" live"
     last_wd="$wd"
-    gw=0; ping -c 1 -W 2 192.168.0.1 >/dev/null 2>&1 && gw=1
+    # Зонд шлюза — TCP, не ICMP: Keenetic не отвечает на unprivileged
+    # dgram-ping (у /usr/bin/ping нет suid/caps; root/raw — отвечает),
+    # поэтому ping из user-контекста давал вечный gw=0.
+    gw=0; timeout 2 bash -c 'exec 3<>/dev/tcp/192.168.0.1/443' 2>/dev/null && gw=1
     echo "$(date -u +%FT%TZ) up=$(cut -d. -f1 /proc/uptime) rss=${rss}M tz=${tz}C wd$wd_new gw=$gw" >> "$OUT"
     sleep 60
 done
