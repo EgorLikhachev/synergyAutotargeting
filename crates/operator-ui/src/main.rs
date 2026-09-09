@@ -341,6 +341,9 @@ impl eframe::App for OperatorApp {
             // Индикатор FC (ADR-021): видит ли полётник наш RC-поток.
             match status.as_ref().and_then(|s| s.fc.as_ref()) {
                 Some(fc) if fc.online => {
+                    // Строка 1: состояние связи; строка 2: эхо каналов из
+                    // MSP_RC (функциональный порядок FC: R,P,T,Y,AUX1=ARM…)
+                    // — то, что полётник РЕАЛЬНО принимает. Мкс 1000..2000.
                     if fc.rx_ok {
                         ui.label(
                             egui::RichText::new("FC: СВЯЗЬ ОК, RC ПРИНИМАЕТСЯ")
@@ -355,6 +358,22 @@ impl eframe::App for OperatorApp {
                                 .color(Color32::from_rgb(230, 130, 40)),
                         );
                     }
+                    ui.horizontal(|ui| {
+                        const LABELS: [&str; 8] = ["R", "P", "T", "Y", "ARM", "A2", "A3", "A4"];
+                        for (i, v) in fc.ch.iter().take(6).enumerate() {
+                            let frac = ((*v as f32 - 1000.0) / 1000.0).clamp(0.0, 1.0);
+                            let armed_ch = i == 4 && *v > 1700;
+                            let bar = egui::ProgressBar::new(frac)
+                                .desired_width(40.0)
+                                .text(format!("{} {}", LABELS[i], v))
+                                .fill(if armed_ch {
+                                    Color32::from_rgb(200, 60, 60)
+                                } else {
+                                    Color32::from_rgb(90, 150, 200)
+                                });
+                            ui.add(bar);
+                        }
+                    });
                 }
                 Some(_) => {
                     ui.label(
