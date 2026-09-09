@@ -69,6 +69,8 @@ def score_one(run_dir, gt_path):
     # --- трекинг: кадры TRACK с центром рядом с GT ---
     n_track_ok = n_track = 0
     errs = []
+    errs_all = []  # R4: честная метрика — по ВСЕМ TRACK-кадрам с GT,
+    # не только попавшим в допуск (иначе «медиана выжившего» скрывает дрейф)
     for t in tel:
         if t["mode"] != "TRACK" or t.get("x") is None:
             continue
@@ -77,9 +79,11 @@ def score_one(run_dir, gt_path):
         if g is None:
             continue
         cx, cy = center(t["x"], t["y"], t["w"], t["h"])
+        d = ((cx - g[0]) ** 2 + (cy - g[1]) ** 2) ** 0.5
+        errs_all.append(d)
         if abs(cx - g[0]) <= TOL and abs(cy - g[1]) <= TOL:
             n_track_ok += 1
-            errs.append(((cx - g[0]) ** 2 + (cy - g[1]) ** 2) ** 0.5)
+            errs.append(d)
 
     res = {
         "gt_frames": len(gt),
@@ -90,6 +94,10 @@ def score_one(run_dir, gt_path):
         "track_frames": n_track,
         "track_on_target": n_track_ok,
         "track_err_med_px": round(st.median(errs), 1) if errs else None,
+        # R4 (2026-09-09): полный масштаб дрейфа
+        "track_gt_frames": len(errs_all),
+        "track_off_pct": round(100 * (1 - n_track_ok / len(errs_all)), 0) if errs_all else None,
+        "track_err_med_all_px": round(st.median(errs_all), 1) if errs_all else None,
     }
     # рекомендация порога: разделение hit/miss по квартилям
     if hit_conf and miss_conf:
@@ -118,14 +126,16 @@ def main():
         rows.append((name, r))
 
     print(f"{'ролик':14s} {'GT':>5s} {'дет-any':>7s} {'дет-цель':>8s} "
-          f"{'conf+/conf-':>13s} {'трек-цель':>9s} {'ошибка':>6s}")
+          f"{'conf+/conf-':>13s} {'трек-цель':>9s} {'ошибка':>6s} {'оф%':>4s} {'мед-все':>8s}")
     for name, r in rows:
         c1 = f"{r['conf_on_target_med']:.2f}" if r["conf_on_target_med"] else "-"
         c2 = f"{r['conf_off_target_med']:.2f}" if r["conf_off_target_med"] else "-"
         te = str(r["track_err_med_px"]) if r["track_err_med_px"] is not None else "-"
+        off = f"{r['track_off_pct']:.0f}" if r.get('track_off_pct') is not None else "-"
+        med_all = str(r.get('track_err_med_all_px') or "-")
         print(f"{name:14s} {r['gt_frames']:5d} {r['det_frames_any']:7d} "
               f"{r['det_on_target']:8d} {c1 + '/' + c2:>13s} "
-              f"{r['track_on_target']:9d} {te:>6s}")
+              f"{r['track_on_target']:9d} {te:>6s} {off:>4s} {med_all:>8s}")
         if "conf_hint" in r:
             print(f"{'':14s} порог: {r['conf_hint']}")
 
