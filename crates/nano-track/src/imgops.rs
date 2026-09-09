@@ -122,7 +122,7 @@ pub fn get_subwindow(src: &Img, cx: f32, cy: f32, original_sz: i32, resize_sz: u
 /// Превратить RGB24-квадрат в NCHW f32-тензор (значения 0..255).
 /// swap_rb=true меняет местами R и B (если источник BGR).
 pub fn to_nchw_f32(img: &Img, swap_rb: bool) -> Vec<f32> {
-    let n = (img.w as usize * img.h as usize) as usize;
+    let n = img.w as usize * img.h as usize;
     // NCHW: сначала весь канал R, затем G, затем B.
     let mut ch = [Vec::with_capacity(n), Vec::with_capacity(n), Vec::with_capacity(n)];
     for px in img.data.chunks_exact(3) {

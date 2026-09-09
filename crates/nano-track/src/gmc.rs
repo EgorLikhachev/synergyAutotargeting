@@ -32,7 +32,7 @@ impl GmcEstimator {
         let sh = (img.h / DOWNSAMPLE) as i32;
         let (dx, dy) = search_shift(&prev, &small, SEARCH, sw, sh);
         let (dx, dy) = refine(&prev, &small, dx, dy, sw, sh);
-        (dx as f32 * DOWNSAMPLE as f32, dy as f32 * DOWNSAMPLE as f32)
+        (dx * DOWNSAMPLE as f32, dy * DOWNSAMPLE as f32)
     }
 }
 

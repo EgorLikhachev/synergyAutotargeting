@@ -32,22 +32,22 @@ impl TractNets {
                 .model_for_path(p)
                 .map_err(|e| NanoError::ModelLoad {
                     path: p.to_string(),
-                    source: e.into(),
+                    source: e,
                 })?
                 .into_typed()
                 .map_err(|e| NanoError::ModelLoad {
                     path: p.to_string(),
-                    source: e.into(),
+                    source: e,
                 })?
                 .into_optimized()
                 .map_err(|e| NanoError::ModelLoad {
                     path: p.to_string(),
-                    source: e.into(),
+                    source: e,
                 })?
                 .into_runnable()
                 .map_err(|e| NanoError::ModelLoad {
                     path: p.to_string(),
-                    source: e.into(),
+                    source: e,
                 })
         };
         let backbone_z = load(backbone_z_path)?;

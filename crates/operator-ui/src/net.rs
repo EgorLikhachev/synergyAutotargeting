@@ -72,6 +72,7 @@ pub struct FcState {
     #[serde(default)]
     pub rx_ok: bool,
     #[serde(default)]
+    #[allow(dead_code)] // протокольное поле ADR-021 (flags FC), читается в ui_sim/журналах
     pub flags: u32,
     #[serde(default)]
     pub ch: Vec<u16>,

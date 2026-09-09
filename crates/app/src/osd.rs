@@ -66,6 +66,7 @@ pub fn draw_crosshair(img: &mut [u8], w: u32, h: u32, cx: i32, cy: i32, color: R
 }
 
 /// Надпись цифрами/минимумом букв, масштаб scale (1 = 3×5 пикселей на глиф).
+#[allow(clippy::too_many_arguments)] // растеризация: кадр + позиция + стиль
 pub fn draw_text(img: &mut [u8], w: u32, h: u32, text: &str, x: i32, y: i32, color: Rgb, scale: i32) {
     let mut cx = x;
     for ch in text.chars() {
@@ -76,6 +77,7 @@ pub fn draw_text(img: &mut [u8], w: u32, h: u32, text: &str, x: i32, y: i32, col
     }
 }
 
+#[allow(clippy::too_many_arguments)] // растеризация: кадр + позиция + стиль
 fn draw_glyph(
     img: &mut [u8],
     w: u32,

@@ -228,7 +228,7 @@ impl NanoTracker {
         let mut penalty = vec![0f32; ss * ss];
         let mut pscore = vec![0f32; ss * ss];
         for i in 0..ss * ss {
-            penalty[i] = ((rc[i] * sc[i] - 1.0) * self.cfg.penalty_k * -1.0).exp();
+            penalty[i] = (-(rc[i] * sc[i] - 1.0) * self.cfg.penalty_k).exp();
             pscore[i] = penalty[i] * score[i];
             pscore[i] = pscore[i] * (1.0 - self.cfg.window_influence)
                 + self.hanning[i] * self.cfg.window_influence;

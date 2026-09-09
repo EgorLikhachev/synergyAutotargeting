@@ -217,8 +217,11 @@ struct CommanderCtx {
     /// Разрешение наведения от оператора (АРМ); выкл — стики в центр.
     pub armed: bool,
     /// Диагностика последнего тика (L3): err, vel, lead, каналы.
-    pub last_logged: Option<((f32, f32), (f32, f32), (f32, f32), [u16; 16])>,
+    pub last_logged: Option<TickDiag>,
 }
+
+/// Один тик наведения для офлайн-журнала (L3): (err, vel, lead, каналы RC).
+pub type TickDiag = ((f32, f32), (f32, f32), (f32, f32), [u16; 16]);
 
 impl CommanderCtx {
     fn new(cfg: &AppConfig) -> Result<Self> {
@@ -746,7 +749,6 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
     }
 
     #[allow(clippy::too_many_arguments)]
-    #[allow(clippy::too_many_arguments)]
     fn process_frame(
         &self,
         cfg: &AppConfig,
@@ -990,8 +992,7 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
             });
             cmd.tick(state.mode, target, (w, h));
             // L3: журнал тика для офлайн-тюнинга PID.
-            if diag.enabled() && cmd.last_logged.is_some() {
-                let (err, vel, lead, ch) = cmd.last_logged.unwrap();
+            if let Some((err, vel, lead, ch)) = cmd.last_logged.filter(|_| diag.enabled()) {
                 let mode_s = match state.mode {
                     Mode::Tracking => "TRACK",
                     Mode::DetectAcquire => "ACQUIRE",
@@ -1333,7 +1334,8 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
         let (w, h) = (640u32, 480u32);
         let frame_period = Duration::from_secs_f32(1.0 / 30.0);
         let mut last_dets: Vec<Detection> = Vec::new();
-        let (mut fps, mut track_ms, mut det_ms) = (0f32, 0f32, None);
+        let (mut track_ms, mut det_ms) = (0f32, None);
+        let mut fps;
         let mut fps_counter = FpsCounter::new();
         let started = Instant::now();
         for (seq, jpeg) in frames.iter().enumerate() {
@@ -1366,6 +1368,7 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)] // сквозной прогон: конфиг+состояние пайплайна
     fn run_synthetic(
         &self,
         cfg: &AppConfig,
@@ -1440,6 +1443,8 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
 }
 
 /// Сборщик производительности/здоровья (L5): p50/p95 каждые 5 с в perf.jsonl.
+/// Потребуется только live-циклу камеры (linux); replay/synthetic путь не пишет.
+#[cfg(target_os = "linux")]
 struct PerfState {
     started: Instant,
     cap_us: Vec<u64>,
@@ -1449,6 +1454,7 @@ struct PerfState {
     last_flush: Instant,
 }
 
+#[cfg(target_os = "linux")]
 impl PerfState {
     fn new() -> Self {
         Self {
@@ -2024,39 +2030,6 @@ fn serde_json_line(line: &TelemetryLine) -> String {
     )
 }
 
-/// RGB24 → NV12 (Y плоскость + чересстрочная UV), для аппаратного H.264.
-fn rgb24_to_nv12(rgb: &[u8], w: u32, h: u32) -> Vec<u8> {
-    let (w, h) = (w as usize, h as usize);
-    let mut out = vec![0u8; w * h * 3 / 2];
-    let (y_plane, uv_plane) = out.split_at_mut(w * h);
-    for yy in 0..h {
-        for xx in 0..w {
-            let i = (yy * w + xx) * 3;
-            let (r, g, b) = (rgb[i] as i32, rgb[i + 1] as i32, rgb[i + 2] as i32);
-            y_plane[yy * w + xx] = ((77 * r + 150 * g + 29 * b) >> 8) as u8;
-        }
-    }
-    for yy in 0..h / 2 {
-        for xx in 0..w / 2 {
-            let base = (2 * yy * w + 2 * xx) * 3;
-            let (mut sr, mut sg, mut sb) = (0i32, 0i32, 0i32);
-            for dy in 0..2 {
-                for dx in 0..2 {
-                    let i = base + (dy * w + dx) * 3;
-                    sr += rgb[i] as i32;
-                    sg += rgb[i + 1] as i32;
-                    sb += rgb[i + 2] as i32;
-                }
-            }
-            let (r, g, b) = (sr >> 2, sg >> 2, sb >> 2);
-            let uv = (yy * (w / 2) + xx) * 2;
-            uv_plane[uv] = (((-43 * r - 85 * g + 128 * b) >> 8) + 128) as u8;
-            uv_plane[uv + 1] = (((128 * r - 107 * g - 21 * b) >> 8) + 128) as u8;
-        }
-    }
-    out
-}
-
 /// RGB24 → JPEG в память (планарная укладка для jpeg-encoder).
 fn encode_jpeg_bytes(rgb: &[u8], w: u32, h: u32, quality: u8) -> Result<Vec<u8>> {
     let mut out = Vec::with_capacity(rgb.len() / 6);
@@ -2069,12 +2042,6 @@ fn encode_jpeg_bytes(rgb: &[u8], w: u32, h: u32, quality: u8) -> Result<Vec<u8>>
         encoder.encode(rgb, w as u16, h as u16, jpeg_encoder::ColorType::Rgb)?;
     }
     Ok(out)
-}
-
-fn save_jpeg(rgb: &[u8], w: u32, h: u32, path: &str) -> Result<()> {
-    let bytes = encode_jpeg_bytes(rgb, w, h, 80)?;
-    std::fs::write(path, bytes)?;
-    Ok(())
 }
 
 /// Диагностика tract↔rknn (фаза C): одинаковые кропы, косинус выходов.

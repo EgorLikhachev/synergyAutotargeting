@@ -21,6 +21,8 @@ pub struct DiagSink {
     raw_detections: Option<File>,
     commander: Option<File>,
     gmc: Option<File>,
+    // Пишется live-циклом камеры (linux): perf.jsonl через DiagSink::perf.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     perf: Option<File>,
 }
 
@@ -86,6 +88,7 @@ impl DiagSink {
     }
 
     /// Каталог прогона (для снапшотов и отчёта).
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     pub fn dir(&self) -> Option<&PathBuf> {
         self.dir.as_ref()
     }
@@ -124,6 +127,7 @@ impl DiagSink {
     }
 
     /// Тик контура наведения (L3): ошибка px, скорость цели, каналы.
+    #[allow(clippy::too_many_arguments)]
     #[inline]
     pub fn commander_tick(
         &mut self,
@@ -156,6 +160,7 @@ impl DiagSink {
 
     /// Периодическая сводка производительности/здоровья (L5).
     #[inline]
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     pub fn perf(&mut self, line: &str) {
         if let Some(f) = self.perf.as_mut() {
             let _ = f.write_all(line.as_bytes());

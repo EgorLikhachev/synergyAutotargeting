@@ -461,8 +461,8 @@ pub fn tiles_2x2(w: u32, h: u32) -> Vec<Tile> {
     if w < 64 || h < 64 {
         return vec![Tile { x: 0, y: 0, w, h }];
     }
-    let tile_w = ((w as u32 * 11) / 20).max(32); // ~55 %
-    let tile_h = ((h as u32 * 11) / 20).max(32);
+    let tile_w = ((w * 11) / 20).max(32); // ~55 %
+    let tile_h = ((h * 11) / 20).max(32);
     let tile_w = tile_w.min(w);
     let tile_h = tile_h.min(h);
     let stride_x = w - tile_w;

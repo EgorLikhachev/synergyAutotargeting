@@ -5,6 +5,7 @@ use serde::Deserialize;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
+#[derive(Default)]
 pub struct AppConfig {
     pub camera: VideoConfig,
     pub detector: DetectorConfig,
@@ -18,22 +19,6 @@ pub struct AppConfig {
     pub logging: LoggingConfig,
 }
 
-impl Default for AppConfig {
-    fn default() -> Self {
-        Self {
-            camera: VideoConfig::default(),
-            detector: DetectorConfig::default(),
-            tracker: TrackerConfig::default(),
-            pipeline: PipelineConfig::default(),
-            output: OutputConfig::default(),
-            stream: StreamConfig::default(),
-            commander: CommanderConfig::default(),
-            synthetic: SyntheticConfig::default(),
-            control: ControlConfig::default(),
-            logging: LoggingConfig::default(),
-        }
-    }
-}
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
@@ -265,6 +250,7 @@ impl Default for SyntheticConfig {
 /// Канал операторского UI (ADR-016): борт подключается к приложению сам.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
+#[derive(Default)]
 pub struct ControlConfig {
     /// Адрес контрольного канала UI, напр. "192.168.0.174:9010"; пусто — выкл.
     pub ui_addr: String,
@@ -275,11 +261,6 @@ pub struct ControlConfig {
     pub token: String,
 }
 
-impl Default for ControlConfig {
-    fn default() -> Self {
-        Self { ui_addr: String::new(), token: String::new() }
-    }
-}
 
 /// Режимы работы (ADR-017): battle — ничего не пишем; diag — полный сбор.
 #[derive(Debug, Clone, Deserialize, PartialEq)]

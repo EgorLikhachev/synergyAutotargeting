@@ -3,7 +3,7 @@
 A hybrid target-tracking system for the Radxa ROCK 5A (RK3588S): YOLOv8 object
 **detection on the NPU every N frames** + NanoTrack **tracking on every frame**,
 with live OSD streaming, telemetry, and an aiming-command output (MSP over
-UART). The runtime is **100% Rust** — no Python or C++ in the pipeline.
+USB VCP — proven on the bench — or UART). The runtime is **100% Rust** — no Python or C++ in the pipeline.
 
 ![CI](https://github.com/EgorLikhachev/synergyAutotargeting/actions/workflows/ci.yml/badge.svg)
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
@@ -141,7 +141,7 @@ CLI flags: `--config PATH`, `--synthetic`, `--duration SEC`, `--demo-detect`,
 ## Testing
 
 ```bash
-cargo test --workspace      # 63 unit tests (decoder, PID, MSP, stabilization…)
+cargo test --workspace      # 69 unit tests (decoder, PID, MSP, stabilization…)
 cargo clippy --workspace    # CI enforces zero warnings
 ```
 

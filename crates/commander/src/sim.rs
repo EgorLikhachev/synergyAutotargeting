@@ -68,6 +68,12 @@ pub struct NoopLink {
     pub sent: std::sync::atomic::AtomicU64,
 }
 
+impl Default for NoopLink {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl NoopLink {
     pub fn new() -> Self {
         Self {

@@ -7,6 +7,18 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- CI clippy gate (`-D warnings`) made truthful: 34 accumulated warnings
+  fixed — mechanical lints auto-applied (useless conversions/casts,
+  derivable `Default` impls, doc-quote markers, `-1` multiplication),
+  truly dead code deleted (unused `save_jpeg`/`rgb24_to_nv12` duplicates
+  in app; the real converter lives in the capture crate), linux-only
+  diagnostics correctly gated (`PerfState` and DiagSink perf/dir APIs are
+  consumed only by the linux camera loop — `cfg_attr(not(linux),
+  allow(dead_code))` instead of false "dead" on Windows), unwrap-after-
+  is_some replaced with `if let … .filter()`, `TickDiag` type alias for
+  the L3 log tuple, explicit `allow(too_many_arguments)` on rendering /
+  pipeline-pass functions. `cargo clippy --workspace` → 0 warnings,
+  `cargo test --workspace` → 69/69.
 - Soak `gw=0` mystery solved: the Keenetic gateway does not answer
   unprivileged datagram-socket pings (no suid/caps on /usr/bin/ping), so
   ICMP probes from user context always fail while root/raw (netwatch
