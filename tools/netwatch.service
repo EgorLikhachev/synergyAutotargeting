@@ -1,0 +1,12 @@
+[Unit]
+Description=synergy netwatch: сетевое здоровье борта (пинг шлюза + TCP-проба sshd)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/home/radxa/synergy/tools/netwatch.sh
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
