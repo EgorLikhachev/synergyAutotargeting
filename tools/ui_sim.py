@@ -74,11 +74,17 @@ class UiSim:
                     except ValueError:
                         continue
                     prev_armed = self.status.get('armed')
+                    prev_fc = self.status.get('fc') or {}
                     self.status = st
                     self.status_lines.append(st)
                     if prev_armed is not None and st.get('armed') != prev_armed:
                         self._log('armed: %s -> %s' % (prev_armed, st.get('armed')))
                         self.events.append((time.time(), 'armed=%s' % st.get('armed')))
+                    fc = st.get('fc') or {}
+                    key = (fc.get('online'), fc.get('rx_ok'))
+                    if fc and prev_fc and key != (prev_fc.get('online'), prev_fc.get('rx_ok')):
+                        self._log('fc: online=%s rx_ok=%s' % key)
+                        self.events.append((time.time(), 'fc online=%s rx_ok=%s' % key))
             except socket.timeout:
                 pass
             except OSError:
@@ -182,6 +188,12 @@ class UiSim:
         time.sleep(0.3)
         print('== сводка: видео %.1f МБ, JPEG-маркеров %d, статусов %d' %
               (self.video_bytes / 1e6, self.video_jpegs, len(self.status_lines)))
+        fc = self.status.get('fc')
+        if fc:
+            ch = fc.get('ch') or []
+            print('== fc напоследок: online=%s rx_ok=%s flags=0x%x ch=%s' %
+                  (fc.get('online'), fc.get('rx_ok'), fc.get('flags') or 0,
+                   ch[:6]))
         for ts, ev in self.events:
             print('== %6.2f %s' % (ts - self.t0, ev))
 
