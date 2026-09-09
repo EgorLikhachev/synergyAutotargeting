@@ -39,3 +39,5 @@ refvideo/runs_board/
 # python-артефакты FC-инструментов
 __pycache__/
 *.pyc
+dataset/
+data/
