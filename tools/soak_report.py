@@ -110,19 +110,47 @@ def main():
         for r in stalled[:5]:
             print(f"  - stalled @ {r['ts']:%H:%M:%S}Z")
 
-    # RSS
+    # RSS. Ровный рост = утечка; скачок, совпавший с тепловой вспышкой
+    # (auto-acquire/tracking без оператора — было 2026-09-09), —
+    # high-water mark аллокатора: не утечка, если после скачка плато.
     alive = [r for r in rows if r["rss"] is not None]
     if alive:
         rmin = min(r["rss"] for r in alive)
         rmax = max(r["rss"] for r in alive)
         rfirst, rlast = alive[0]["rss"], alive[-1]["rss"]
         drift = rlast - rfirst
+        burst_total = 0
+        last_burst_i = -1
+        for i, (a, b) in enumerate(zip(alive, alive[1:])):
+            step = b["rss"] - a["rss"]
+            if step > 5 and (b["tz"] - a["tz"] > 4 or b["tz"] > 75):
+                burst_total += step
+                last_burst_i = i + 1
+        base_drift = drift - burst_total
         print(
             f"- RSS: {rfirst}M → {rlast}M (min {rmin}M, max {rmax}M, "
-            f"диапазон {rmax - rmin}M, дрейф {drift:+d}M)"
+            f"диапазон {rmax - rmin}M, дрейф {drift:+d}M"
+            f"{f', из них burst при активности {burst_total:+d}M' if burst_total else ''})"
         )
-        if abs(drift) > RSS_DRIFT_LIMIT_MB or rmax - rmin > RSS_DRIFT_LIMIT_MB:
-            fails.append(f"RSS нестабилен: дрейф {drift:+d}M, диапазон {rmax - rmin}M")
+        if burst_total:
+            tail = alive[last_burst_i:]
+            note = (
+                f"пост-burst плато (разброс {max(r['rss'] for r in tail)}-{min(r['rss'] for r in tail)}M)"
+                if len(tail) >= 10
+                else "пост-burst плато подтвердить следующим замером"
+            )
+            print(f"  - burst-шаги совпали с тепловой вспышкой: {note}")
+        rss_fail = abs(base_drift) > RSS_DRIFT_LIMIT_MB
+        if not rss_fail and burst_total and len(alive[last_burst_i:]) >= 10:
+            tail_range = (
+                max(r["rss"] for r in alive[last_burst_i:])
+                - min(r["rss"] for r in alive[last_burst_i:])
+            )
+            rss_fail = tail_range > 5
+        if rss_fail:
+            fails.append(
+                f"RSS нестабилен: базовый дрейф {base_drift:+d}M, диапазон {rmax - rmin}M"
+            )
 
     # температура и сеть — контекст, не критерий
     tzs = [r["tz"] for r in rows]

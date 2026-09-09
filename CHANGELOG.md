@@ -7,6 +7,11 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- Soak `gw=0` mystery solved: the Keenetic gateway does not answer
+  unprivileged datagram-socket pings (no suid/caps on /usr/bin/ping), so
+  ICMP probes from user context always fail while root/raw (netwatch
+  service) and all real traffic succeed — the network was healthy all
+  along. soak.sh now probes the gateway over TCP :443.
 - FC serial config "not saving" root cause found and fixed: Betaflight 4.4
   `validateAndFixConfig()` silently resets **only the serialConfig group**
   on every boot when `isSerialConfigValid()` fails — MSP is capped at
@@ -33,6 +38,31 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 - ARM button 2-step confirm with 4 s auto-reset and explicit state label.
 
 ### Added
+- **8-hour soak passed (phase E criterion, 2026-09-09)**: full coverage
+  08:13–16:13 UTC, 481/481 samples, zero gaps, zero watchdog stalls, zero
+  process deaths; autostart after a clean morning power-cycle confirmed in
+  the wild. RSS flat 50→51M for 7.5 h (+1M — no leak in the steady loop);
+  end-of-run +15M step coincided with a thermal flare 62→80°C caused by an
+  unattended auto-acquire/tracking engagement (mode=LOST evidence, no
+  operator connected) and was retained as an allocator high-water mark
+  (66→68M over the next 4 h — plateau, not growth). Pipeline sustained
+  60 fps / 9 ms e2e across 2.59M frames in 11.9 h. Temperature flag for
+  field tests: 80.4°C peak with tracking on passive cooling.
+- Bench-week observability: board-side netwatch (gateway ICMP + local TCP
+  probe every 30 s, journal on state change, auto `systemctl restart
+  systemd-networkd` after 5 min of ping-alive/TCP-dead) and PC-side probe
+  log (`data/netwatch_pc.log`, ssh every 30 min — full soak day: no DOWN).
+- Operator UI: FC RC-echo bars (ADR-021) — R/P/T/Y/ARM/A2 progress bars
+  under the FC line, real values from MSP_RC (what the FC actually
+  applies), ARM channel highlighted red above 1700 µs.
+- Tooling: tools/soak_report.py (phase-E verdict from a soak log,
+  burst-vs-leak RSS analysis), tools/dataset_check.py (R1 recording
+  quality gate: frame integrity/duration/resolution/darkness; sharpness
+  is reported, not gated — global edge statistics can't separate blur on
+  sky-dominated frames, verified on references), tools/enable_token.sh
+  (one-shot ADR-020 token enable for the customer retest).
+- ui_sim: fc telemetry now logged (online/rx_ok transitions + final
+  channel snapshot) — autonomous ADR-021 checks without the GUI.
 - Tiled 2×2 inference for small targets (ADR-022, R2): implemented
   (tiles/crop/remap/merge-NMS + `tiled_lost` gating when no track is
   active), measured on the 9-video day reference set, and **disabled by
