@@ -21,7 +21,7 @@ while [ $SECONDS -lt $END ]; do
         cpu=$(( (cpu) * 100 / 100 ))
     fi
     tz=$(awk '{printf "%.1f", $1/1000}' /sys/class/thermal/thermal_zone0/temp 2>/dev/null)
-    wd=$(systemctl show synergy -p WatchdogTimestamp --value 2>/dev/null | cut -dT+ -f2)
+    wd=$(systemctl show synergy -p WatchdogTimestamp --value 2>/dev/null)
     wd_new=" stalled"
     [ "$wd" != "$last_wd" ] && wd_new=" live"
     last_wd="$wd"
