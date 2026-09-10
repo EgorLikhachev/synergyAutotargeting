@@ -6,6 +6,24 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Arming-disable flags decoded in the UI (ADR-021 refinement): the exact
+  BF 4.4.3 armingDisableFlags table (26 flags, runtime_config.h) now
+  lives in commander::msp; the operator panel shows "АРМ-блок FC: …"
+  (top-3 blockers + count, ARM_SWITCH suppressed) whenever the FC would
+  refuse arming. The empirically found bit 0x80 is actually
+  ARMING_DISABLED_THROTTLE — our safe frame carries throttle 1310 >
+  min_check, so the bit still works as an RC-stream-alive detector, but
+  it also means the FC cannot arm while our safe stream is active (the
+  rc-alive semantics hold only at T=1310; documented in ADR-021).
+- Anti-hijack detection merge (ADR-023): a confirming detection (IoU ≥
+  iou_confirm) re-anchors the tracker immediately as before, but an
+  out-of-box detection now requires `re_anchor_streak` (default 2)
+  consecutive hits before switching the anchor — a single false positive
+  can no longer steal the aim point. Streak-wait frames return the real
+  tracker score. `[pipeline] re_anchor_streak = 1` restores the old
+  immediate-switch behavior.
+
 ### Fixed
 - CI clippy gate (`-D warnings`) made truthful: 34 accumulated warnings
   fixed — mechanical lints auto-applied (useless conversions/casts,

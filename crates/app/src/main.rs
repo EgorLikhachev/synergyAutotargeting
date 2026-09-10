@@ -396,6 +396,7 @@ impl Runner {
             min_track_score: cfg.tracker.min_track_score,
             lost_patience: cfg.pipeline.lost_patience,
             min_detect_conf: cfg.pipeline.min_detect_conf,
+            re_anchor_streak: cfg.pipeline.re_anchor_streak,
             priority_classes: cfg.pipeline.priority_classes.clone(),
             use_stabilizer: cfg.pipeline.use_stabilizer,
             gmc: cfg.pipeline.gmc,

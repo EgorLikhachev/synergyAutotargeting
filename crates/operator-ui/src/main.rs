@@ -374,6 +374,27 @@ impl eframe::App for OperatorApp {
                             ui.add(bar);
                         }
                     });
+                    // Почему FC не вооружится: armingDisableFlags BF 4.4.3
+                    // (таблица в commander::msp). Не путать с нашим armed:
+                    // это блокировки НА СТОРОНЕ ПОЛЁТНИКА.
+                    if !status.as_ref().is_some_and(|s| s.armed) {
+                        let blockers = commander::msp::arming_disable_names(fc.flags);
+                        if !blockers.is_empty() {
+                            let head: Vec<&str> =
+                                blockers.iter().take(3).copied().collect();
+                            let extra = blockers.len() - head.len();
+                            let text = if extra > 0 {
+                                format!("АРМ-блок FC: {} (+{})", head.join(", "), extra)
+                            } else {
+                                format!("АРМ-блок FC: {}", head.join(", "))
+                            };
+                            ui.label(
+                                egui::RichText::new(text)
+                                    .size(10.0)
+                                    .color(Color32::from_rgb(200, 160, 60)),
+                            );
+                        }
+                    }
                 }
                 Some(_) => {
                     ui.label(

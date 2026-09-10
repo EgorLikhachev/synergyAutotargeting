@@ -38,6 +38,13 @@ pub struct HybridConfig {
     pub lost_patience: u32,
     /// Минимальная уверенность детекции для захвата цели.
     pub min_detect_conf: f32,
+    /// Сколько ПОДРЯД «несогласных» детекций (IoU < iou_confirm с текущим
+    /// боксом) требуется для смены якоря. 1 — старое поведение (единичная
+    /// детекция сразу уводит трек). Подтверждающая детекция (IoU ≥
+    /// iou_confirm) ре-якорит сразу же, без счётчика. Анти-угон: в R4
+    /// трекер дрейфовал на фон при живом счёте, но и одиночный ложный
+    /// детект не должен перехватывать наведение (ADR-023).
+    pub re_anchor_streak: u32,
     /// Цифровая стабилизация (GMC): компенсация глобального сдвига кадра
     /// перед трекингом — для жёсткого монтажа камеры без виброразвязки.
     pub gmc: bool,
@@ -55,6 +62,7 @@ impl Default for HybridConfig {
             min_track_score: 0.30,
             lost_patience: 3,
             min_detect_conf: 0.45,
+            re_anchor_streak: 2,
             priority_classes: Vec::new(),
             use_stabilizer: true,
             gmc: false,
@@ -83,6 +91,10 @@ pub struct HybridTracker {
     config: HybridConfig,
     frames_since_detect: u32,
     low_score_streak: u32,
+    /// Счётчик ПОДРЯД детекций вне текущего бокса (анти-угон, ADR-023).
+    disagree_streak: u32,
+    /// Score трекера с последнего кадра (для ранних возвратов из on_detection).
+    last_score: f32,
     last_bbox: Option<BBox>,
     last_det_iou: Option<f32>,
     /// Авто-захват по детекциям. Снимается командой unlock() и включается
@@ -99,6 +111,34 @@ fn should_detect(frame_idx: u64, every_n: u32, lost: bool) -> bool {
     lost || frame_idx % every_n.max(1) as u64 == 0
 }
 
+/// Решение о слиянии детекции с активным треком (ADR-023).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DetMerge {
+    /// Подтверждение цели (IoU ≥ iou_confirm): реинициализация трекера
+    /// на боксе детекции сразу — мягкая коррекция дрейфа.
+    Confirm,
+    /// Детекция вне бокса, серия несогласных ещё не набрана: игнорируем,
+    /// трек продолжается (анти-угон: одиночный ложный детект не уводит цель).
+    WaitStreak,
+    /// Вне бокса И серия набралась: ре-якорь (трекер удрейфовал — R4,
+    /// либо смена цели).
+    ReAnchor,
+}
+
+fn merge_decision(tracker_live: bool, iou: f32, streak: u32, cfg: &HybridConfig) -> DetMerge {
+    if !tracker_live {
+        return DetMerge::ReAnchor; // трека нет — это захват, не угон
+    }
+    if iou >= cfg.iou_confirm {
+        return DetMerge::Confirm;
+    }
+    if streak >= cfg.re_anchor_streak.max(1) {
+        DetMerge::ReAnchor
+    } else {
+        DetMerge::WaitStreak
+    }
+}
+
 impl HybridTracker {
     pub fn new(tracker: NanoTracker, config: HybridConfig) -> Self {
         let gmc = config
@@ -112,6 +152,8 @@ impl HybridTracker {
             config,
             frames_since_detect: 0,
             low_score_streak: 0,
+            disagree_streak: 0,
+            last_score: 0.0,
             last_bbox: None,
             last_det_iou: None,
             auto_acquire: true,
@@ -138,6 +180,7 @@ impl HybridTracker {
         self.last_bbox = None;
         self.last_det_iou = None;
         self.low_score_streak = 0;
+        self.disagree_streak = 0;
         self.detect_inflight = false;
         self.tracker.clear();
         self.stabilizer.clear();
@@ -203,18 +246,42 @@ impl HybridTracker {
 
         self.last_det_iou = current.map(|b| b.iou(&pick.bbox));
 
-        let mut box_ = pick.bbox;
-        if let Some(_cur) = current {
-            if self.last_det_iou.unwrap_or(0.0) >= self.config.iou_confirm
-                && self.tracker.is_initialized()
-            {
-                // Та же цель: мягкая коррекция — реинициализация на боксе детекции.
-                tracing::debug!(
-                    iou = self.last_det_iou.unwrap_or(0.0),
-                    "детекция подтверждает цель, реинициализация трекера"
-                );
+        // Слияние с активным треком (ADR-023): подтверждающая детекция
+        // ре-якорит сразу (мягкая коррекция дрейфа); вне бокса — только
+        // после streak ПОДРЯД несогласных (анти-угон от одиночного ложного
+        // детекта; сам streak и набранная серия = ре-якорь при дрейфе R4).
+        let decision = merge_decision(
+            self.tracker.is_initialized(),
+            self.last_det_iou.unwrap_or(0.0),
+            self.disagree_streak + 1,
+            &self.config,
+        );
+        match decision {
+            DetMerge::Confirm => {
+                self.disagree_streak = 0;
+                tracing::debug!(iou = self.last_det_iou.unwrap_or(0.0),
+                    "детекция подтверждает цель, реинициализация трекера");
+            }
+            DetMerge::WaitStreak => {
+                self.disagree_streak += 1;
+                tracing::debug!(iou = self.last_det_iou.unwrap_or(0.0),
+                    streak = self.disagree_streak,
+                    "детекция вне бокса — ждём подтверждения, трек продолжается");
+                let mut st = self.state(Mode::Tracking);
+                st.score = self.last_score;
+                return st;
+            }
+            DetMerge::ReAnchor => {
+                if self.tracker.is_initialized() {
+                    tracing::info!(iou = self.last_det_iou.unwrap_or(0.0),
+                        streak = self.disagree_streak,
+                        "ре-якорь: серия несогласных детекций (дрейф/смена цели)");
+                }
+                self.disagree_streak = 0;
             }
         }
+
+        let mut box_ = pick.bbox;
         box_.clamp_to(frame.w, frame.h);
         let score = pick.confidence;
 
@@ -248,6 +315,7 @@ impl HybridTracker {
         self.stabilizer.clear();
         self.stabilizer.set_hw([box_.w, box_.h]);
         self.low_score_streak = 0;
+        self.disagree_streak = 0;
         self.detect_inflight = false;
         self.last_det_iou = None;
         self.last_bbox = Some(box_);
@@ -317,6 +385,7 @@ impl HybridTracker {
         }
 
         self.last_bbox = Some(b);
+        self.last_score = score;
         let mut st = self.state(Mode::Tracking);
         st.score = score;
         st
@@ -373,5 +442,22 @@ mod tests {
         }
         assert_eq!(hits, 3);
         let _ = cfg;
+    }
+
+    #[test]
+    fn merge_decision_table() {
+        let cfg = HybridConfig::default(); // iou_confirm 0.3, streak 2
+        // Подтверждение: детекция в боксе — реинициализация сразу.
+        assert_eq!(merge_decision(true, 0.5, 1, &cfg), DetMerge::Confirm);
+        assert_eq!(merge_decision(true, 0.3, 9, &cfg), DetMerge::Confirm);
+        // Анти-угон: одиночная детекция вне бокса НЕ уводит трек.
+        assert_eq!(merge_decision(true, 0.1, 1, &cfg), DetMerge::WaitStreak);
+        // Серия набралась — ре-якорь (дрейф R4 / смена цели).
+        assert_eq!(merge_decision(true, 0.1, 2, &cfg), DetMerge::ReAnchor);
+        // Трека нет — любая детекция это захват, не угон.
+        assert_eq!(merge_decision(false, 0.0, 1, &cfg), DetMerge::ReAnchor);
+        // streak=1 — старое поведение (мгновенный угон) как аварийный люк.
+        let old = HybridConfig { re_anchor_streak: 1, ..Default::default() };
+        assert_eq!(merge_decision(true, 0.1, 1, &old), DetMerge::ReAnchor);
     }
 }

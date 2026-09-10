@@ -97,6 +97,9 @@ pub struct PipelineConfig {
     pub iou_confirm: f32,
     pub lost_patience: u32,
     pub min_detect_conf: f32,
+    /// Подряд детекций вне бокса до смены якоря (анти-угон, ADR-023;
+    /// 1 = мгновенная смена как до 09-2026).
+    pub re_anchor_streak: u32,
     pub priority_classes: Vec<u32>,
     pub use_stabilizer: bool,
     /// Цифровая стабилизация (GMC) — жёсткий монтаж камеры.
@@ -110,6 +113,7 @@ impl Default for PipelineConfig {
             iou_confirm: 0.3,
             lost_patience: 3,
             min_detect_conf: 0.45,
+            re_anchor_streak: 2,
             priority_classes: Vec::new(),
             use_stabilizer: true,
             gmc: false,

@@ -15,13 +15,59 @@ pub const MSP_RC: u8 = 105;
 /// MSP_RAW_GPS (запрос телеметрии GPS у полётника).
 pub const MSP_RAW_GPS: u8 = 106;
 
-/// Бит armingDisableFlags, определён ЭМПИРИЧЕСКИ на GEPRCF405 / BF 4.4.3
-/// (2026-09-08, дампы в ADR-021): установлен ⟺ полётник видит живой
-/// RC-поток с aux-arm (наши кадры несут aux1=1950 постоянно). При тишине
-/// >0,5 с бит пропадает вместе с RC (failsafe). Используется как индикатор
-/// > «FC видит RC» в телеметрии пульта. Постоянный шум других бит
-/// > (0x0200000c на этом стенде) игнорируется.
-pub const ARMING_FLAG_RC_ALIVE: u32 = 1 << 7;
+/// ARMING_DISABLED_THROTTLE (runtime_config.h BF 4.4.3, бит 7): «гас выше
+/// min_check — арм запрещён». На нашем стенде работает как детектор живого
+/// RC-стрима: safe-кадр несёт aux-arm 1950 и throttle 1310 > min_check
+/// (1050), поэтому бит стоит ⟺ FC применяет наши кадры; при тишине >0,5 с
+/// бит пропадает вместе с RC (failsafe). Определено эмпирически 2026-09-08
+/// (дампы в ADR-021: 0x0200_008c стрим / 0x0200_000c тишина).
+pub const ARMING_DISABLED_THROTTLE: u32 = 1 << 7;
+/// Устаревшее имя той же константы (эмпирическая интерпретация была
+/// «RC alive»; корректная семантика — THROTTLE, см. таблицу ниже).
+pub const ARMING_FLAG_RC_ALIVE: u32 = ARMING_DISABLED_THROTTLE;
+
+/// armingDisableFlags по порядку битов (BF 4.4.3 runtime_config.h,
+/// «перечислены по критичности»; ARM_SWITCH обязан быть последним —
+/// взводится всегда, когда активен любой другой флаг).
+pub const ARMING_DISABLE_NAMES: [&str; 26] = [
+    "NO_GYRO",          // 0
+    "FAILSAFE",         // 1
+    "RX_FAILSAFE",      // 2
+    "BAD_RX_RECOVERY",  // 3
+    "BOXFAILSAFE",      // 4
+    "RUNAWAY_TAKEOFF",  // 5
+    "CRASH_DETECTED",   // 6
+    "THROTTLE",         // 7 — при нашем safe-кадре = «FC видит RC»
+    "ANGLE",            // 8
+    "BOOT_GRACE_TIME",  // 9
+    "NOPREARM",         // 10
+    "LOAD",             // 11
+    "CALIBRATING",      // 12
+    "CLI",              // 13
+    "CMS_MENU",         // 14
+    "BST",              // 15
+    "MSP",              // 16
+    "PARALYZE",         // 17
+    "GPS",              // 18
+    "RESC",             // 19
+    "RPMFILTER",        // 20
+    "REBOOT_REQUIRED",  // 21
+    "DSHOT_BITBANG",    // 22
+    "ACC_CALIBRATION",  // 23
+    "MOTOR_PROTOCOL",   // 24
+    "ARM_SWITCH",       // 25 — сопутствующий, для оператора не показывать
+];
+
+/// Имена активных блокировок арма (без сопутствующего ARM_SWITCH).
+pub fn arming_disable_names(flags: u32) -> Vec<&'static str> {
+    let mut out = Vec::new();
+    for (i, name) in ARMING_DISABLE_NAMES.iter().enumerate() {
+        if flags & (1 << i) != 0 && i != 25 {
+            out.push(*name);
+        }
+    }
+    out
+}
 
 /// Телеметрия FC, публикуемая в статус UI (ADR-021).
 #[derive(Debug, Clone, Default)]
@@ -304,7 +350,27 @@ mod tests {
         ];
         assert_eq!(parse_status_flags(&payload), Some(0x0200_008c));
         // RC жив (бит 7 стоит) vs тишина (0x0200_000c — бита нет)
-        assert!(0x0200_008c & ARMING_FLAG_RC_ALIVE != 0);
-        assert!(0x0200_000c & ARMING_FLAG_RC_ALIVE == 0);
+        assert!(0x0200_008c & ARMING_DISABLED_THROTTLE != 0);
+        assert!(0x0200_000c & ARMING_DISABLED_THROTTLE == 0);
+    }
+
+    #[test]
+    fn arming_disable_decode_real_dumps() {
+        // Стрим жив: RX_FAILSAFE|BAD_RX_RECOVERY|THROTTLE (+ARM_SWITCH)
+        assert_eq!(
+            arming_disable_names(0x0200_008c),
+            vec!["RX_FAILSAFE", "BAD_RX_RECOVERY", "THROTTLE"]
+        );
+        // Тишина: THROTTLE пропадает вместе с RC-потоком
+        assert_eq!(
+            arming_disable_names(0x0200_000c),
+            vec!["RX_FAILSAFE", "BAD_RX_RECOVERY"]
+        );
+        // Один бит (встречался в живом статусе при выключенном стриме)
+        assert_eq!(arming_disable_names(4), vec!["RX_FAILSAFE"]);
+        // ARM_SWITCH (бит 25) — сопутствующий, оператору не показываем
+        assert!(arming_disable_names(1 << 25).is_empty());
+        // Всё чисто — армить можно
+        assert!(arming_disable_names(0).is_empty());
     }
 }
