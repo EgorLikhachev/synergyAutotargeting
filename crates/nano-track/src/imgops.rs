@@ -4,15 +4,30 @@
 
 /// Изображение RGB24.
 #[derive(Debug, Clone)]
-pub struct Img {
+/// Кадр RGB24. `Cow`-данные: горячий путь передаёт заимствованный срез
+/// кадра (без копии 0.9 МБ), кропы/ресайзы владеют своими буферами.
+pub struct Img<'a> {
     pub w: u32,
     pub h: u32,
-    pub data: Vec<u8>,
+    pub data: std::borrow::Cow<'a, [u8]>,
 }
 
-impl Img {
+impl<'a> Img<'a> {
     pub fn new(data: Vec<u8>, w: u32, h: u32) -> Self {
-        Self { w, h, data }
+        Self {
+            w,
+            h,
+            data: std::borrow::Cow::Owned(data),
+        }
+    }
+
+    /// Заимствованный кадр: клонирования данных нет.
+    pub fn borrowed(data: &'a [u8], w: u32, h: u32) -> Self {
+        Self {
+            w,
+            h,
+            data: std::borrow::Cow::Borrowed(data),
+        }
     }
 
     /// Средний цвет каналов (R, G, B), прореживание `step` по строкам и
@@ -50,7 +65,7 @@ impl Img {
 }
 
 /// Билинейный ресайз RGB24 → квадрат dst_sz × dst_sz.
-pub fn resize_square(src: &Img, dst_sz: u32) -> Img {
+pub fn resize_square(src: &Img<'_>, dst_sz: u32) -> Img<'static> {
     let (sw, sh) = (src.w as usize, src.h as usize);
     let dsz = dst_sz as usize;
     let mut out = vec![0u8; dsz * dsz * 3];
@@ -84,7 +99,13 @@ pub fn resize_square(src: &Img, dst_sz: u32) -> Img {
 /// Вырезать окно размером original_sz×original_sz вокруг центра (cx, cy),
 /// дополняя выход за границы изображения средним цветом, и сресайзить в
 /// resize_sz×resize_sz. Порт getSubwindow().
-pub fn get_subwindow(src: &Img, cx: f32, cy: f32, original_sz: i32, resize_sz: u32) -> Img {
+pub fn get_subwindow(
+    src: &Img<'_>,
+    cx: f32,
+    cy: f32,
+    original_sz: i32,
+    resize_sz: u32,
+) -> Img<'static> {
     let img_w = src.w as i32;
     let img_h = src.h as i32;
     let c = (original_sz + 1) / 2;

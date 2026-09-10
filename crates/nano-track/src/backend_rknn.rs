@@ -100,7 +100,7 @@ impl RknnNets {
         // буфер внутрь сам (rknn_inputs_set, copy-режим — ADR-011).
         let outs = if self.swap_rb {
             // Модели сконвертированы под RGB; при необходимости меняем каналы.
-            let mut sw = crop.data.clone();
+            let mut sw = crop.data.clone().into_owned();
             for px in sw.chunks_exact_mut(3) {
                 px.swap(0, 2);
             }

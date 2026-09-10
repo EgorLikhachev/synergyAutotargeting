@@ -120,7 +120,7 @@ mod tests {
     use super::*;
 
     /// Текстурный кадр 320×240: градиенты + «объект».
-    fn scene(shift_x: i32, shift_y: i32) -> Img {
+    fn scene(shift_x: i32, shift_y: i32) -> Img<'static> {
         let (w, h) = (320u32, 240u32);
         let mut data = vec![0u8; (w * h * 3) as usize];
         for y in 0..h {

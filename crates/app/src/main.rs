@@ -812,7 +812,7 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
             stats.detections_run += 1;
             stats.detect_us_total += 1000;
             *det_ms = Some(1.0);
-            let img = Img::new(rgb.clone(), w, h);
+            let img = Img::borrowed(&rgb, w, h);
             let st = hybrid.on_detection(std::slice::from_ref(&det), &img);
             if st.mode == Mode::DetectAcquire {
                 stats.reacquires += 1;
@@ -827,7 +827,7 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
                     control::UiCmd::Lock { x, y, size } => {
                         let half = (size / 2.0).max(4.0);
                         let bbox = common::BBox::new(x - half, y - half, size, size);
-                        let img = Img::new(rgb.clone(), w, h);
+                        let img = Img::borrowed(&rgb, w, h);
                         let st = hybrid.on_manual_roi(bbox, &img);
                         tracing::info!(x, y, size, mode = ?st.mode, "UI: ручной захват цели");
                         stats.reacquires += 1;
@@ -904,7 +904,7 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
                         if !r.detections.is_empty() {
                             stats.detections_hits += 1;
                         }
-                        let img = Img::new(rgb.clone(), w, h);
+                        let img = Img::borrowed(&rgb, w, h);
                         let st = hybrid.on_detection(&r.detections, &img);
                         if st.mode == Mode::DetectAcquire {
                             stats.reacquires += 1;
@@ -912,7 +912,7 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
                     }
                     Err(e) => {
                         tracing::error!(error = %e, "детектор вернул ошибку");
-                        let img = Img::new(rgb.clone(), w, h);
+                        let img = Img::borrowed(&rgb, w, h);
                         hybrid.on_detection(&[], &img);
                     }
                 }
@@ -921,7 +921,7 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
 
         // 3) Трекинг текущего кадра.
         let t0 = Instant::now();
-        let img = Img::new(rgb.clone(), w, h);
+        let img = Img::borrowed(&rgb, w, h);
         let state = hybrid.on_frame(&img);
         let tus = t0.elapsed().as_micros();
         // Полная латентность: получение кадра (до декодирования) → бокс готов.
@@ -1005,7 +1005,9 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
         // если есть зритель (listen или push), иначе JPEG не кодируем вовсе.
         if let Some(st) = stream {
             if st.wanted() && seq % st.frame_div.max(1) as u64 == 0 {
-                st.enc_tx.send((rgb.clone(), w, h));
+                // Последний потребитель кадра: двигаем, а не клонируем
+                // (раньше +0.9 МБ memcpy на каждый кодируемый кадр).
+                st.enc_tx.send((rgb, w, h));
             }
         }
 
@@ -1446,7 +1448,7 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
                 if !dets.is_empty() {
                     stats.detections_hits += 1;
                 }
-                let img = Img::new(frame.data.clone(), w, h);
+                let img = Img::borrowed(&frame.data, w, h);
                 let st = hybrid.on_detection(&dets, &img);
                 if st.mode == Mode::DetectAcquire {
                     stats.reacquires += 1;
