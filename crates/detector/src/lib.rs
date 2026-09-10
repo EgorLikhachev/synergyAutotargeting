@@ -27,21 +27,24 @@ impl LetterboxParams {
     }
 }
 
-/// Letterbox кадра RGB24 в квадрат target×target с заполнением 114.
-/// Возвращает готовые NHWC-байты и параметры обратного преобразования.
-pub fn letterbox_rgb24(
+/// Letterbox кадра RGB24 в квадрат target×target с заполнением 114,
+/// в ПЕРЕИСПОЛЬЗУЕМЫЙ буфер `out` (в цикле детекции экономит аллокацию
+/// 1.2 МБ на запрос). Возвращает параметры обратного преобразования.
+pub fn letterbox_rgb24_into(
     rgb: &[u8],
     w: u32,
     h: u32,
     target: u32,
-) -> (Vec<u8>, LetterboxParams) {
+    out: &mut Vec<u8>,
+) -> LetterboxParams {
     let scale = (target as f32 / w as f32).min(target as f32 / h as f32);
     let new_w = (w as f32 * scale).round() as u32;
     let new_h = (h as f32 * scale).round() as u32;
     let pad_x = ((target - new_w) / 2) as i32;
     let pad_y = ((target - new_h) / 2) as i32;
 
-    let mut out = vec![114u8; (target * target * 3) as usize];
+    out.clear();
+    out.resize((target * target * 3) as usize, 114u8);
 
     // Билинейная ресайз-вставка. Для каждой строки назначения считаем
     // источник один раз — этого достаточно по качеству для int8 NPU.
@@ -68,15 +71,19 @@ pub fn letterbox_rgb24(
         }
     }
 
-    (
-        out,
-        LetterboxParams {
-            scale,
-            pad_x: pad_x as f32,
-            pad_y: pad_y as f32,
-            target,
-        },
-    )
+    LetterboxParams {
+        scale,
+        pad_x: pad_x as f32,
+        pad_y: pad_y as f32,
+        target,
+    }
+}
+
+/// Одноразовая версия letterbox (тесты/редкие вызовы): свежий буфер.
+pub fn letterbox_rgb24(rgb: &[u8], w: u32, h: u32, target: u32) -> (Vec<u8>, LetterboxParams) {
+    let mut out = Vec::new();
+    let lb = letterbox_rgb24_into(rgb, w, h, target, &mut out);
+    (out, lb)
 }
 
 /// Конфигурация декодера.
@@ -91,6 +98,13 @@ pub struct DecoderConfig {
     /// Считать классы логитами и применить sigmoid (layout SingleHead).
     /// Для YoloBranches-6 автодетект выставит false.
     pub sigmoid_classes: bool,
+    /// Ранний пол отсева ДО DFL-декодинга бокса: якорь с conf ниже пола
+    /// не проходит ни общий, ни пер-класс порог (пол = min всех порогов
+    /// потребителя), поэтому DFL (64 exp + 64 div на якорь) для него
+    /// вычислять не нужно. 0.0 — раннего отсева нет. Экономит ~0.5M
+    /// exp() на детекцию: порогу 0.45 обычно не соответствует >99%
+    /// из 8400 якорей.
+    pub decode_floor: f32,
 }
 
 impl Default for DecoderConfig {
@@ -100,6 +114,7 @@ impl Default for DecoderConfig {
             nms_threshold: 0.45,
             class_names: Vec::new(),
             sigmoid_classes: false,
+            decode_floor: 0.0,
         }
     }
 }
@@ -357,7 +372,10 @@ impl YoloDecoder {
                         }
                     }
                     let conf = best.clamp(0.0, 1.0);
-                    if !conf.is_finite() {
+                    // Ранний отсев: якорь ниже пола не пройдёт ни один
+                    // порог потребителя — DFL не считаем (главную экономию
+                    // даёт именно здесь: 64 exp/див на якорь).
+                    if !conf.is_finite() || conf < self.config.decode_floor {
                         continue;
                     }
                     // === DFL по 4 сторонам, 64 канала = 4 × 16 бинов ===
@@ -479,12 +497,19 @@ pub fn tiles_2x2(w: u32, h: u32) -> Vec<Tile> {
 /// Кроп под-прямоугольника из interleaved RGB24.
 pub fn crop_rgb24(rgb: &[u8], w: u32, t: Tile) -> Vec<u8> {
     let mut out = Vec::with_capacity((t.w * t.h * 3) as usize);
+    crop_rgb24_into(rgb, w, t, &mut out);
+    out
+}
+
+/// Кроп тайла в переиспользуемый буфер (цикл детекции, ADR-022).
+pub fn crop_rgb24_into(rgb: &[u8], w: u32, t: Tile, out: &mut Vec<u8>) {
+    out.clear();
+    out.reserve((t.w * t.h * 3) as usize);
     for row in 0..t.h {
         let src = (((t.y + row) * w + t.x) as usize) * 3;
         let src = src.min(rgb.len().saturating_sub((t.w as usize) * 3));
         out.extend_from_slice(&rgb[src..src + (t.w as usize) * 3]);
     }
-    out
 }
 
 /// Сдвиг детекции из координат тайла в координаты кадра.
@@ -523,6 +548,75 @@ mod tests {
             pad_x: 0.0,
             pad_y: 80.0, // 640x480 → 640x640: полосы по 80 сверху/снизу
             target: 640,
+        }
+    }
+
+    /// YoloBranches-выходы 3 масштабов с одним «ярким» якорем и шумом:
+    /// decode с ранним полом (decode_floor = conf_threshold) обязан дать
+    /// БИТ-в-идентичный результат decode без пола.
+    #[test]
+    fn decode_floor_bit_identical() {
+        fn branches_outputs() -> (Vec<Vec<f32>>, Vec<Vec<u32>>) {
+            // 6 веток (3 масштаба × box+cls) — меньше detect_layout не примет.
+            let (gh, gw, nc) = (8u32, 8u32, 2u32);
+            let spatial = (gh * gw) as usize;
+            let mut box_out = vec![0f32; 64 * spatial];
+            let mut cls_out = vec![-8f32; nc as usize * spatial]; // шум ≈ 0
+            // Один якорь с высокой уверенностью класса 1.
+            let hot = 3 * gh as usize + 5;
+            cls_out[1 * spatial + hot] = 5.0;
+            // DFL: расстояние 2 px на каждую сторону (бин 2 с весом 1).
+            for side in 0..4 {
+                let base = side * 16 * spatial + hot;
+                box_out[base + 2 * spatial] = 8.0; // ch_base + k*gh_w
+            }
+            // Масштабы 2-3: валидные по размеру, но пустые (шум ниже порога).
+            let mk_scale = |g: u32| -> (Vec<f32>, Vec<f32>, Vec<u32>, Vec<u32>) {
+                let sp = (g * g) as usize;
+                (
+                    vec![0f32; 64 * sp],
+                    vec![-8f32; nc as usize * sp],
+                    vec![1, 64, g, g],
+                    vec![1, nc, g, g],
+                )
+            };
+            let (b2, c2, d2b, d2c) = mk_scale(4);
+            let (b3, c3, d3b, d3c) = mk_scale(2);
+            (
+                vec![box_out, cls_out, b2, c2, b3, c3],
+                vec![
+                    vec![1, 64, gh, gw],
+                    vec![1, nc, gh, gw],
+                    d2b,
+                    d2c,
+                    d3b,
+                    d3c,
+                ],
+            )
+        }
+        let (outs, dims) = branches_outputs();
+        let mk = |floor| {
+            YoloDecoder::from_output_dims(
+                &dims,
+                DecoderConfig {
+                    conf_threshold: 0.45,
+                    decode_floor: floor,
+                    ..Default::default()
+                },
+            )
+            .unwrap()
+        };
+        let a = mk(0.0).decode(&outs, &dims, &lb_640(), 640, 480, 7);
+        let b = mk(0.45).decode(&outs, &dims, &lb_640(), 640, 480, 7);
+        assert!(!a.is_empty(), "фикстура обязана дать детекцию");
+        assert_eq!(a.len(), b.len());
+        for (x, y) in a.iter().zip(&b) {
+            assert_eq!(x.class_id, y.class_id);
+            assert!((x.confidence - y.confidence).abs() < 1e-9);
+            assert!((x.bbox.x - y.bbox.x).abs() < 1e-5);
+            assert!((x.bbox.y - y.bbox.y).abs() < 1e-5);
+            assert!((x.bbox.w - y.bbox.w).abs() < 1e-5);
+            assert!((x.bbox.h - y.bbox.h).abs() < 1e-5);
         }
     }
 

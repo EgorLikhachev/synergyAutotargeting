@@ -15,20 +15,37 @@ impl Img {
         Self { w, h, data }
     }
 
-    /// Средний цвет каналов (R, G, B).
-    pub fn mean_color(&self) -> [f32; 3] {
-        let n = (self.w as usize * self.h as usize) as f32;
-        let mut sum = [0f64; 3];
-        for px in self.data.chunks_exact(3) {
-            sum[0] += px[0] as f64;
-            sum[1] += px[1] as f64;
-            sum[2] += px[2] as f64;
+    /// Средний цвет каналов (R, G, B), прореживание `step` по строкам и
+    /// столбцам (1 = все пиксели). Для padding-цвета кропа достаточно
+    /// step=8 (сдвиг среднего < 1 LSB), а полный проход по кадру стоил
+    /// 0.3-0.6 мс на каждый кадр трекинга.
+    pub fn mean_color_strided(&self, step: usize) -> [f32; 3] {
+        let step = step.max(1);
+        let w = self.w as usize;
+        let mut sum = [0u64; 3];
+        let mut n = 0u64;
+        for y in (0..self.h as usize).step_by(step) {
+            let line = &self.data[y * w * 3..(y + 1) * w * 3];
+            for px in line.chunks_exact(3).step_by(step) {
+                sum[0] += px[0] as u64;
+                sum[1] += px[1] as u64;
+                sum[2] += px[2] as u64;
+                n += 1;
+            }
+        }
+        if n == 0 {
+            return [0.0; 3];
         }
         [
-            (sum[0] / n as f64) as f32,
-            (sum[1] / n as f64) as f32,
-            (sum[2] / n as f64) as f32,
+            sum[0] as f32 / n as f32,
+            sum[1] as f32 / n as f32,
+            sum[2] as f32 / n as f32,
         ]
+    }
+
+    /// Средний цвет всех пикселей (точный).
+    pub fn mean_color(&self) -> [f32; 3] {
+        self.mean_color_strided(1)
     }
 }
 
@@ -68,7 +85,6 @@ pub fn resize_square(src: &Img, dst_sz: u32) -> Img {
 /// дополняя выход за границы изображения средним цветом, и сресайзить в
 /// resize_sz×resize_sz. Порт getSubwindow().
 pub fn get_subwindow(src: &Img, cx: f32, cy: f32, original_sz: i32, resize_sz: u32) -> Img {
-    let avg = src.mean_color();
     let img_w = src.w as i32;
     let img_h = src.h as i32;
     let c = (original_sz + 1) / 2;
@@ -80,8 +96,16 @@ pub fn get_subwindow(src: &Img, cx: f32, cy: f32, original_sz: i32, resize_sz: u
 
     let left_pad = (-context_xmin).max(0);
     let top_pad = (-context_ymin).max(0);
-    let _right_pad = (context_xmax - img_w + 1).max(0);
-    let _bottom_pad = (context_ymax - img_h + 1).max(0);
+    let right_pad = (context_xmax - img_w + 1).max(0);
+    let bottom_pad = (context_ymax - img_h + 1).max(0);
+
+    // Средний цвет нужен ТОЛЬКО для заполнения padding-областей; в
+    // штатном сопровождении окно целиком внутри кадра — проход не делаем.
+    let avg = if left_pad > 0 || top_pad > 0 || right_pad > 0 || bottom_pad > 0 {
+        src.mean_color_strided(8)
+    } else {
+        [0f32; 3]
+    };
 
     let x_min = context_xmin + left_pad;
     let x_max = context_xmax + left_pad;

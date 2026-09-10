@@ -95,20 +95,23 @@ impl RknnNets {
     }
 
     fn run_backbone(&mut self, which: bool, crop: &Img) -> NanoResult<Vec<f32>> {
-        let data = if self.swap_rb {
+        let model = if which { &mut self.x } else { &mut self.z };
+        // Без swap_rb клон не нужен вовсе (195 КБ/кадр): рантайм копирует
+        // буфер внутрь сам (rknn_inputs_set, copy-режим — ADR-011).
+        let outs = if self.swap_rb {
             // Модели сконвертированы под RGB; при необходимости меняем каналы.
             let mut sw = crop.data.clone();
             for px in sw.chunks_exact_mut(3) {
                 px.swap(0, 2);
             }
-            sw
+            model
+                .infer(&sw)
+                .map_err(|e| NanoError::Inference(anyhow::anyhow!("backbone RKNN: {e}")))?
         } else {
-            crop.data.clone()
+            model
+                .infer(&crop.data)
+                .map_err(|e| NanoError::Inference(anyhow::anyhow!("backbone RKNN: {e}")))?
         };
-        let model = if which { &mut self.x } else { &mut self.z };
-        let outs = model
-            .infer(&data)
-            .map_err(|e| NanoError::Inference(anyhow::anyhow!("backbone RKNN: {e}")))?;
         outs.into_iter()
             .next()
             .ok_or_else(|| NanoError::BadOutputShape("backbone без выходов".into()))

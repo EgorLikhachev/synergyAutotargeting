@@ -187,6 +187,9 @@ struct TelemetryLine {
 
 struct RunStats {
     frames: u64,
+    /// Кэш OSD-таймстемпа: (unix-сек, отформатированная строка) —
+    /// форматирование chrono на каждый кадр не нужно.
+    osd_ts: (i64, String),
     detections_run: u64,
     detections_hits: u64,
     reacquires: u64,
@@ -530,6 +533,7 @@ impl Runner {
 
         let mut stats = RunStats {
             frames: 0,
+            osd_ts: (0, String::new()),
             detections_run: 0,
             detections_hits: 0,
             reacquires: 0,
@@ -640,6 +644,14 @@ impl Runner {
             };
             let nms = cfg.detector.nms_threshold;
             let class_names = cfg.detector.class_names.clone();
+            // Ранний пол декодера = min(общий порог, все пер-класс пороги):
+            // якорь ниже пола отбросится любым из фильтров потребителя,
+            // поэтому DFL для него можно не считать (см. DecoderConfig).
+            let decode_floor = cfg
+                .detector
+                .class_thresholds
+                .values()
+                .fold(conf, |a, &b| a.min(b));
             let handle = std::thread::Builder::new()
                 .name("npu-detector".into())
                 .spawn(move || {
@@ -661,6 +673,7 @@ impl Runner {
                             nms_threshold: nms,
                             class_names,
                             sigmoid_classes: false,
+                            decode_floor,
                         },
                     ) {
                         Some(d) => d,
@@ -681,6 +694,11 @@ impl Runner {
                         classes = decoder.num_classes,
                         "декодер YOLOv8 готов"
                     );
+                    // Переиспользуемые буферы цикла детекции (раньше каждый
+                    // запрос аллоцировал letterbox 1.2 МБ + кропы тайлов,
+                    // в LOST-режиме — бэк-ту-бэк).
+                    let mut lb_buf: Vec<u8> = Vec::new();
+                    let mut crop_buf: Vec<u8> = Vec::new();
                     while let Ok((rgb, w, h, seq, tiled)) = req_rx.recv() {
                         tracing::debug!(seq, tiled, "детектор получил запрос");
                         let t0 = Instant::now();
@@ -695,12 +713,12 @@ impl Runner {
                                 let mut all = Vec::new();
                                 let mut ms = 0.0f32;
                                 for t in detector::tiles_2x2(w, h) {
-                                    let crop = detector::crop_rgb24(&rgb, w, t);
-                                    let (letterboxed, lb) =
-                                        detector::letterbox_rgb24(&crop, t.w, t.h, lb_w);
+                                    detector::crop_rgb24_into(&rgb, w, t, &mut crop_buf);
+                                    let lb =
+                                        detector::letterbox_rgb24_into(&crop_buf, t.w, t.h, lb_w, &mut lb_buf);
                                     let t1 = Instant::now();
                                     let outputs =
-                                        model.infer(&letterboxed).map_err(|e| e.to_string())?;
+                                        model.infer(&lb_buf).map_err(|e| e.to_string())?;
                                     ms += t1.elapsed().as_secs_f32() * 1000.0;
                                     for d in decoder.decode(&outputs, &dims, &lb, t.w, t.h, seq) {
                                         all.push(detector::det_to_frame(d, t));
@@ -708,10 +726,10 @@ impl Runner {
                                 }
                                 (detector::nms_merge(all, nms), ms)
                             } else {
-                                let (letterboxed, lb) =
-                                    detector::letterbox_rgb24(&rgb, w, h, lb_w);
+                                let lb =
+                                    detector::letterbox_rgb24_into(&rgb, w, h, lb_w, &mut lb_buf);
                                 let outputs =
-                                    model.infer(&letterboxed).map_err(|e| e.to_string())?;
+                                    model.infer(&lb_buf).map_err(|e| e.to_string())?;
                                 let dets = decoder.decode(&outputs, &dims, &lb, w, h, seq);
                                 (dets, t0.elapsed().as_secs_f32() * 1000.0)
                             };
@@ -942,12 +960,18 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
         );
         // Таймстемп локального времени и уверенность последней детекции —
         // для покадрового сопоставления с эталонным видео (фаза A).
+        // Форматирование кэшируется на секунду (chrono::format на каждый
+        // кадр — лишняя аллокация и работа в горячем цикле).
         let now = chrono::Local::now();
+        let sec = now.timestamp();
+        if sec != stats.osd_ts.0 {
+            stats.osd_ts = (sec, now.format("%H:%M:%S").to_string());
+        }
         osd::draw_text(
             &mut rgb,
             w,
             h,
-            &now.format("%H:%M:%S").to_string(),
+            &stats.osd_ts.1,
             w as i32 - 62,
             8,
             osd::Rgb::Yellow,
@@ -1004,8 +1028,10 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
             }
         }
 
-        // 6) Статус операторскому UI (ADR-016).
-        if let Some(ctl) = control {
+        // 6) Статус операторскому UI (ADR-016). Прореживание 15 Гц
+        // (каждый 4-й кадр): пульт перерисовывается на 30 Гц, а сборка
+        // строки — ~15-20 аллокаций (детекции/каналы FC) на кадр.
+        if let Some(ctl) = control.and_then(|c| (stats.frames % 4 == 0).then_some(c)) {
             let dets_json: Vec<String> = last_dets
                 .iter()
                 .map(|d| {
