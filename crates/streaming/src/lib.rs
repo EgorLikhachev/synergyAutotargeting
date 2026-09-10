@@ -118,6 +118,10 @@ impl MjpegPusher {
                     let tcp = TcpStream::connect_timeout(&sa, std::time::Duration::from_secs(2));
                     if let Ok(mut s) = tcp {
                         let _ = s.set_nodelay(true);
+                        // «Серый» зритель (не читает и не рвёт TCP) иначе
+                        // держит поток в write_all до ретрансмиссионного
+                        // таймаута (~15 мин): стрим мёртв, реконнекта нет.
+                        let _ = s.set_write_timeout(Some(Duration::from_secs(3)));
                         let head = b"HTTP/1.0 200 OK\r\n\
                                      Content-Type: multipart/x-mixed-replace; boundary=frame\r\n\
                                      Cache-Control: no-store\r\n\r\n";
@@ -250,6 +254,8 @@ impl MjpegServer {
 fn serve_client(mut stream: TcpStream, hub: Arc<Hub>) {
     let peer = stream.peer_addr().map(|a| a.to_string()).unwrap_or_default();
     let _ = stream.set_nodelay(true);
+        // «Серый» клиент: без таймаута записи поток висит в write_all ~15 мин
+        let _ = stream.set_write_timeout(Some(Duration::from_secs(3)));
     let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
     // Съесть HTTP-запрос; путь решает, что отдавать.
     let mut buf = [0u8; 2048];
@@ -308,9 +314,12 @@ align-items:center;justify-content:center}img{max-width:100%;max-height:100%}\
                     .unwrap();
                 inner = guard;
                 if timeout.timed_out() && inner.generation <= seen {
-                    // Нет кадров 5 с — проверить клиента пустым разделителем.
+                    // Нет кадров 5 с — проверить клиента разделителем
+                    // (пустой write_all байтов не пишет и живость НЕ
+                    // проверяет; boundary — валидная часть multipart).
                     drop(inner);
-                    if stream.write_all(b"").is_err() {
+                    if stream.write_all(b"--frame
+").is_err() {
                         let mut g = hub.inner.lock().unwrap();
                         g.clients = g.clients.saturating_sub(1);
                         return;

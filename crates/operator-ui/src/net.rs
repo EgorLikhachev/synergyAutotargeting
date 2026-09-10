@@ -485,6 +485,18 @@ fn spawn_control_listener(
                 if !connected.load(Ordering::Relaxed) {
                     break;
                 }
+                // recv_timeout вместо sleep-поллинга: команда (LOCK после
+                // двойного клика) уходит немедленно, а не с задержкой до
+                // 20 мс; по таймауту — плановый ping.
+                match rx.recv_timeout(Duration::from_millis(300)) {
+                    Ok(cmd) => {
+                        if writer.write_all(cmd.to_json(&token).as_bytes()).is_err() {
+                            break;
+                        }
+                    }
+                    Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                }
                 while let Ok(cmd) = rx.try_recv() {
                     if writer.write_all(cmd.to_json(&token).as_bytes()).is_err() {
                         break;
@@ -496,7 +508,6 @@ fn spawn_control_listener(
                     }
                     last_ping = Instant::now();
                 }
-                std::thread::sleep(Duration::from_millis(20));
             }
             let _ = reader_handle.join();
             *cmd_slot.lock().unwrap_or_else(|e| e.into_inner()) = None;

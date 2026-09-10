@@ -78,6 +78,12 @@ impl ControlLink {
                     if let Ok(mut sock) = sock {
                         let _ = sock.set_nodelay(true);
                         let _ = sock.set_read_timeout(Some(Duration::from_millis(50)));
+                        // Таймаут записи: «серый» клиент (не читает, но и не
+                        // рвёт TCP) иначе вешает write_all на ~15 мин TCP-
+                        // ретрансмиссий — цикл стоит, STOP не читается и
+                        // dead-man не проверяется. Обрыв записи = разрыв
+                        // канала → существующий путь делает СТОП при armed.
+                        let _ = sock.set_write_timeout(Some(Duration::from_millis(500)));
                         let _ = sock.write_all(b"{\"t\":\"hello\"}\n");
                         let _ = sock.flush();
                         conn.store(true, Ordering::Relaxed);
