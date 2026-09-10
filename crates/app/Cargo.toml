@@ -28,8 +28,8 @@ chrono.workspace = true
 serde_json.workspace = true
 libc.workspace = true
 clap.workspace = true
-jpeg-decoder.workspace = true
 jpeg-encoder.workspace = true
+zune-jpeg = "0.4"
 
 [features]
 default = []

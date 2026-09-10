@@ -1629,21 +1629,22 @@ fn split_mjpeg(data: &[u8]) -> Vec<&[u8]> {
     out
 }
 
-/// JPEG → RGB24 packed.
+/// JPEG → RGB24 packed (zune-jpeg: ~2-4× быстрее прежнего jpeg-decoder;
+/// replay-прогоны и MJPEG-захват ускоряются одинаково).
 fn decode_jpeg_rgb(jpeg: &[u8]) -> Result<Vec<u8>> {
-    let mut dec = jpeg_decoder::Decoder::new(jpeg);
-    let pixels = dec.decode().context("jpeg decode")?;
-    let info = dec.info().context("jpeg info")?;
-    match info.pixel_format {
-        jpeg_decoder::PixelFormat::RGB24 => Ok(pixels),
-        jpeg_decoder::PixelFormat::L8 => {
+    use zune_jpeg::zune_core::colorspace::ColorSpace;
+    let mut dec = zune_jpeg::JpegDecoder::new(jpeg);
+    let pixels = dec.decode().map_err(|e| anyhow::anyhow!("jpeg decode: {e:?}"))?;
+    match dec.get_output_colorspace() {
+        Some(ColorSpace::RGB) => Ok(pixels),
+        Some(ColorSpace::Luma) => {
             let mut rgb = Vec::with_capacity(pixels.len() * 3);
             for &p in &pixels {
                 rgb.extend_from_slice(&[p, p, p]);
             }
             Ok(rgb)
         }
-        _ => bail!("неподдерживаемый формат JPEG: {:?}", info.pixel_format),
+        other => bail!("неподдерживаемый формат JPEG: {other:?}"),
     }
 }
 

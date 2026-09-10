@@ -8,12 +8,12 @@ license.workspace = true
 [dependencies]
 eframe = "0.29"
 egui = "0.29"
-jpeg-decoder.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true
 # Только ради msp::arming_disable_names (таблица флагов BF 4.4.3) —
 # единый источник истины с бортом.
 commander = { path = "../commander" }
+zune-jpeg = "0.4"
 
 [dependencies.serde]
 workspace = true

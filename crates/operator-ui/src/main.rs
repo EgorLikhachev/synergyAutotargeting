@@ -64,7 +64,7 @@ impl OperatorApp {
             Default::default(),
         );
         Self {
-            net: NetState::new(),
+            net: NetState::new(Some(cc.egui_ctx.clone())),
             texture,
             tex_version: 0,
             frame_wh: (FRAME_W, FRAME_H),
@@ -183,16 +183,19 @@ impl eframe::App for OperatorApp {
 
         // подгрузка кадра (размер берём фактический — борт может прислать
         // не 640×480, паниковать на этом нельзя)
-        if let Some(frame) = self.net.take_video_frame() {
+        if let Some(mut frame) = self.net.take_video_frame() {
             if frame.version != self.tex_version {
                 self.tex_version = frame.version;
                 if (frame.w, frame.h) != self.frame_wh {
                     self.frame_wh = (frame.w, frame.h);
                 }
-                self.texture.set(
-                    ColorImage::from_rgba_unmultiplied([frame.w, frame.h], &frame.rgba),
-                    Default::default(),
-                );
+                // ColorImage строится ВЛАДЕНИЕМ пикселей — без копии
+                // (from_rgba_unminiplied копировал 1.2 МБ на кадр).
+                let image = ColorImage {
+                    size: [frame.w, frame.h],
+                    pixels: std::mem::take(&mut frame.rgba),
+                };
+                self.texture.set(image, Default::default());
             }
         }
 

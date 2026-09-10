@@ -46,9 +46,11 @@ pub type ConversionResult<T> = std::result::Result<T, ConversionError>;
 
 /// Декодировать MJPEG кадр в RGB24.
 ///
-/// Использует `jpeg-decoder` crate (pure Rust, no libclang).
+/// Использует `zune-jpeg` crate (pure Rust, ~2-4× быстрее прежнего
+/// jpeg-decoder — важно для MJPEG-камеры 640×480@60).
 /// Возвращает новые Frame с format=RGB24.
 pub fn decode_mjpeg_to_rgb(frame: &Frame) -> ConversionResult<Frame> {
+    use zune_jpeg::zune_core::colorspace::ColorSpace;
     if frame.metadata.format != PixelFormat::Mjpeg {
         return Err(ConversionError::InvalidFormat {
             expected: PixelFormat::Mjpeg,
@@ -56,26 +58,26 @@ pub fn decode_mjpeg_to_rgb(frame: &Frame) -> ConversionResult<Frame> {
         });
     }
 
-    let mut decoder = jpeg_decoder::Decoder::new(&frame.data[..]);
+    let mut decoder = zune_jpeg::JpegDecoder::new(&frame.data[..]);
     let pixels = decoder
         .decode()
-        .map_err(|e| ConversionError::JpegDecode(e.to_string()))?;
+        .map_err(|e| ConversionError::JpegDecode(format!("{e:?}")))?;
+    if decoder.get_output_colorspace() != Some(ColorSpace::RGB) {
+        return Err(ConversionError::JpegDecode(
+            "неподдерживаемый формат JPEG".to_string(),
+        ));
+    }
+    let (width, height) = decoder
+        .dimensions()
+        .ok_or_else(|| ConversionError::JpegDecode("no JPEG dims".to_string()))?;
 
-    let info = decoder
-        .info()
-        .ok_or_else(|| ConversionError::JpegDecode("no JPEG info".to_string()))?;
-
-    debug!(
-        width = info.width,
-        height = info.height,
-        "decoded MJPEG to RGB24"
-    );
+    debug!(width, height, "decoded MJPEG to RGB24");
 
     Ok(Frame {
         data: pixels,
         metadata: FrameMetadata {
-            width: info.width as u32,
-            height: info.height as u32,
+            width: width as u32,
+            height: height as u32,
             format: PixelFormat::Rgb24,
             captured_at: frame.metadata.captured_at,
             seq: frame.metadata.seq,

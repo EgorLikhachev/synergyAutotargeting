@@ -91,7 +91,8 @@ pub struct DetsEntry(
 /// Декодированный кадр для отрисовки.
 pub struct VideoFrame {
     pub version: u64,
-    pub rgba: Vec<u8>,
+    /// Готовые к ColorImage пиксели (конверсия сделана в net-потоке).
+    pub rgba: Vec<egui::Color32>,
     /// Фактический размер кадра (борт может прислать не 640×480).
     pub w: usize,
     pub h: usize,
@@ -282,7 +283,7 @@ pub struct NetState {
 }
 
 impl NetState {
-    pub fn new() -> Self {
+    pub fn new(repaint: Option<egui::Context>) -> Self {
         let s = Self {
             frame: Arc::new(Mutex::new(None)),
             frame_version: Arc::new(AtomicU64::new(0)),
@@ -294,7 +295,7 @@ impl NetState {
             video_fps: Arc::new(Mutex::new((Instant::now(), 0, 0.0))),
             rec: Arc::new(Recorder::new()),
         };
-        spawn_video_listener(s.frame.clone(), s.frame_version.clone(), s.video_connected.clone(), s.video_fps.clone(), s.rec.clone());
+        spawn_video_listener(s.frame.clone(), s.frame_version.clone(), s.video_connected.clone(), s.video_fps.clone(), s.rec.clone(), repaint);
         spawn_control_listener(
             s.control_connected.clone(),
             s.status.clone(),
@@ -354,6 +355,7 @@ fn spawn_video_listener(
     connected: Arc<AtomicBool>,
     fps_meter: Arc<Mutex<(Instant, u32, f32)>>,
     rec: Arc<Recorder>,
+    repaint: Option<egui::Context>,
 ) {
     let _ = std::thread::Builder::new().name("video-rx".into()).spawn(move || {
         let listener = match TcpListener::bind("0.0.0.0:9000") {
@@ -373,6 +375,11 @@ fn spawn_video_listener(
             let mut reader = BufReader::new(stream);
             let mut buf = Vec::with_capacity(64 * 1024);
             let mut chunk = [0u8; 32 * 1024];
+            // Инкрементальный скан: неполный кадр не пересканируется с
+            // нуля на каждый чанк (при 30-60 fps это 3-6× амплификация
+            // байтового сканирования), а с последней позиции (−3 на
+            // straddle маркера).
+            let mut scan_from = 0usize;
             'conn: loop {
                 let n = match reader.read(&mut chunk) {
                     Ok(0) | Err(_) => break 'conn,
@@ -380,9 +387,20 @@ fn spawn_video_listener(
                 };
                 buf.extend_from_slice(&chunk[..n]);
                 // достаём все полные JPEG из буфера
-                while let Some((start, end)) = find_jpeg(&buf) {
+                loop {
+                    let Some(rel) = find_soi(&buf[scan_from..]) else {
+                        scan_from = buf.len().saturating_sub(3);
+                        break;
+                    };
+                    let start = scan_from + rel;
+                    let Some(rel_end) = find_eoi(&buf[start + 3..]) else {
+                        scan_from = start; // кадр копится — ждём хвост
+                        break;
+                    };
+                    let end = start + 3 + rel_end + 2;
                     let jpeg = buf[start..end].to_vec();
                     buf.drain(..end);
+                    scan_from = 0;
                     // запись ведётся из сырого JPEG до декодирования:
                     // перекодирования нет, файл = копия стрима
                     rec.submit(&jpeg);
@@ -391,6 +409,12 @@ fn spawn_video_listener(
                             let v = version.fetch_add(1, Ordering::Relaxed) + 1;
                             *slot.lock().unwrap_or_else(|e| e.into_inner()) =
                                 Some(VideoFrame { version: v, rgba, w, h });
+                            // Событийная перерисовка: кадр пришёл — UI
+                            // обновится сразу, таймер 33 мс остаётся
+                            // фолбэком для статусов без видео.
+                            if let Some(ctx) = repaint.as_ref() {
+                                ctx.request_repaint();
+                            }
                             let mut m = fps_meter.lock().unwrap_or_else(|e| e.into_inner());
                             m.1 += 1;
                             if m.0.elapsed() >= Duration::from_millis(500) {
@@ -517,42 +541,46 @@ fn spawn_control_listener(
 }
 
 /// Поиск полного JPEG (SOI..EOI) в буфере: (start, end).
+#[cfg(test)]
 fn find_jpeg(buf: &[u8]) -> Option<(usize, usize)> {
-    let start = buf.windows(3).position(|w| w == b"\xff\xd8\xff")?;
-    let end_marker = buf[start + 3..]
-        .windows(2)
-        .position(|w| w == b"\xff\xd9")?
-        + start
-        + 3
-        + 2;
-    Some((start, end_marker))
+    let start = find_soi(buf)?;
+    let end = find_eoi(&buf[start + 3..])? + start + 3 + 2;
+    Some((start, end))
 }
 
-/// JPEG → RGBA (jpeg-decoder из workspace). Возвращает (пиксели, w, h).
-fn decode_rgba(jpeg: &[u8]) -> Option<(Vec<u8>, usize, usize)> {
-    let mut dec = jpeg_decoder::Decoder::new(jpeg);
+fn find_soi(buf: &[u8]) -> Option<usize> {
+    buf.windows(3).position(|w| w == b"\xff\xd8\xff")
+}
+
+fn find_eoi(buf: &[u8]) -> Option<usize> {
+    buf.windows(2).position(|w| w == b"\xff\xd9")
+}
+
+/// JPEG → Color32 (zune-jpeg: ~2-4× быстрее чистого Rust-декодера).
+/// Конверсия RGB→Color32 одна, без промежуточного RGBA-буфера.
+fn decode_rgba(jpeg: &[u8]) -> Option<(Vec<egui::Color32>, usize, usize)> {
+    use zune_jpeg::zune_core::colorspace::ColorSpace;
+    let mut dec = zune_jpeg::JpegDecoder::new(jpeg);
     let pixels = dec.decode().ok()?;
-    let info = dec.info()?;
-    let (w, h) = (info.width as usize, info.height as usize);
-    match info.pixel_format {
-        jpeg_decoder::PixelFormat::RGB24 => Some((rgb_to_rgba(&pixels, w * h), w, h)),
-        jpeg_decoder::PixelFormat::L8 => {
-            let mut rgba = Vec::with_capacity(w * h * 4);
-            for &p in &pixels {
-                rgba.extend_from_slice(&[p, p, p, 255]);
+    let (w, h) = dec.dimensions()?;
+    let out = match dec.get_output_colorspace()? {
+        ColorSpace::RGB => {
+            let mut px = Vec::with_capacity(w * h);
+            for p in pixels.chunks_exact(3) {
+                px.push(egui::Color32::from_rgb(p[0], p[1], p[2]));
             }
-            Some((rgba, w, h))
+            px
         }
-        _ => None,
-    }
-}
-
-fn rgb_to_rgba(rgb: &[u8], px: usize) -> Vec<u8> {
-    let mut rgba = Vec::with_capacity(px * 4);
-    for p in rgb.chunks_exact(3) {
-        rgba.extend_from_slice(&[p[0], p[1], p[2], 255]);
-    }
-    rgba
+        ColorSpace::Luma => {
+            let mut px = Vec::with_capacity(w * h);
+            for &g in &pixels {
+                px.push(egui::Color32::from_gray(g));
+            }
+            px
+        }
+        _ => return None,
+    };
+    Some((out, w, h))
 }
 
 #[cfg(test)]

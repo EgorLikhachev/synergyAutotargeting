@@ -13,4 +13,4 @@ chrono.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
 libc.workspace = true
-jpeg-decoder.workspace = true
+zune-jpeg = "0.4"
