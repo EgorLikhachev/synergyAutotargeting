@@ -3,7 +3,7 @@
 ## Where to get help
 
 - **Usage questions and ideas** — open a
-  [GitHub Discussion](https://github.com/EgorLikhachev/synergyAutotargeting/discussions)
+  [GitHub Discussion](https://github.com/EgorLikhachev/synergyAutotargeting/issues)
   if enabled, or a feature-request issue.
 - **Bugs** — open an issue using the
   [bug report template](.github/ISSUE_TEMPLATE/bug_report.md) and include the
