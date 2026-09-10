@@ -18,7 +18,7 @@ use async_trait::async_trait;
 use chrono::Utc;
 use common::{Frame, FrameMetadata, PixelFormat};
 use tokio::sync::mpsc;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 use crate::traits::{VideoCaptureError, VideoResult, VideoSource};
 
@@ -30,7 +30,6 @@ const fn _ioc(dir: u32, typ: u32, nr: u32, size: u32) -> u64 {
 }
 
 // Struct sizes on 64-bit Linux aarch64 (verified via gcc on Orange Pi 5).
-const SZ_CAP: u32 = 104; // sizeof(v4l2_capability)
 const SZ_FMT: u32 = 208; // sizeof(v4l2_format)
 const SZ_PARM: u32 = 204; // sizeof(v4l2_streamparm)
 const SZ_REQBUFS: u32 = 20; // sizeof(v4l2_requestbuffers)
@@ -100,50 +99,9 @@ struct V4l2RequestBuffers {
 }
 // 5 × 4 = 20 ✓
 
-/// v4l2_buffer (88 bytes). Field layout matches kernel exactly on 64-bit.
-#[repr(C)]
-struct V4l2Buffer {
-    index: u32,
-    typ: u32,
-    bytesused: u32,
-    flags: u32,
-    field: u32,
-    _pad0: u32, // alignment padding before timeval (8-byte aligned)
-    ts_sec: i64,
-    ts_usec: i64,
-    timecode: [u8; 24],
-    sequence: u32,
-    memory: u32,
-    // union m (offset/userptr/planes/fd) — 8 bytes on 64-bit
-    m_offset: u32,
-    _pad1: u32,
-    length: u32,
-    reserved2: u32,
-}
-// 5×4 + pad(4) + 2×8 + 24 + 2×4 + 4+pad(4) + 2×4
-// = 20 + 4 + 16 + 24 + 8 + 8 + 8 = 88 ✓
-
-impl Default for V4l2Buffer {
-    fn default() -> Self {
-        Self {
-            index: 0,
-            typ: V4L2_BUF_TYPE_VIDEO_CAPTURE,
-            bytesused: 0,
-            flags: 0,
-            field: 0,
-            _pad0: 0,
-            ts_sec: 0,
-            ts_usec: 0,
-            timecode: [0u8; 24],
-            sequence: 0,
-            memory: V4L2_MEMORY_MMAP,
-            m_offset: 0,
-            _pad1: 0,
-            length: 0,
-            reserved2: 0,
-        }
-    }
-}
+// v4l2_buffer (88 байт) намеренно НЕ описан структурой: QBUF/DQBUF идут
+// сырыми байтовыми буферами (hot path, см. capture loop) — раскладка
+// полей не нужна, прежний мёртвый struct удалён 2026-09-10.
 
 /// v4l2_streamparm — we only need timeperframe, so use raw bytes.
 type V4l2StreamParm = [u8; 204];

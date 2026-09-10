@@ -2031,6 +2031,42 @@ fn serde_json_line(line: &TelemetryLine) -> String {
     )
 }
 
+/// RGB24 → NV12 (Y плоскость + чересстрочная UV), для аппаратного H.264.
+/// Потребляется только linux-веткой энкодера (main.rs H.264-пайплайн);
+/// capture::convert хранит небуферизующий вариант для конвейера камер.
+#[cfg(target_os = "linux")]
+fn rgb24_to_nv12(rgb: &[u8], w: u32, h: u32) -> Vec<u8> {
+    let (w, h) = (w as usize, h as usize);
+    let mut out = vec![0u8; w * h * 3 / 2];
+    let (y_plane, uv_plane) = out.split_at_mut(w * h);
+    for yy in 0..h {
+        for xx in 0..w {
+            let i = (yy * w + xx) * 3;
+            let (r, g, b) = (rgb[i] as i32, rgb[i + 1] as i32, rgb[i + 2] as i32);
+            y_plane[yy * w + xx] = ((77 * r + 150 * g + 29 * b) >> 8) as u8;
+        }
+    }
+    for yy in 0..h / 2 {
+        for xx in 0..w / 2 {
+            let base = (2 * yy * w + 2 * xx) * 3;
+            let (mut sr, mut sg, mut sb) = (0i32, 0i32, 0i32);
+            for dy in 0..2 {
+                for dx in 0..2 {
+                    let i = base + (dy * w + dx) * 3;
+                    sr += rgb[i] as i32;
+                    sg += rgb[i + 1] as i32;
+                    sb += rgb[i + 2] as i32;
+                }
+            }
+            let (r, g, b) = (sr >> 2, sg >> 2, sb >> 2);
+            let uv = (yy * (w / 2) + xx) * 2;
+            uv_plane[uv] = (((-43 * r - 85 * g + 128 * b) >> 8) + 128) as u8;
+            uv_plane[uv + 1] = (((128 * r - 107 * g - 21 * b) >> 8) + 128) as u8;
+        }
+    }
+    out
+}
+
 /// RGB24 → JPEG в память (планарная укладка для jpeg-encoder).
 fn encode_jpeg_bytes(rgb: &[u8], w: u32, h: u32, quality: u8) -> Result<Vec<u8>> {
     let mut out = Vec::with_capacity(rgb.len() / 6);
