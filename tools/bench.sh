@@ -23,6 +23,14 @@ echo "== bench: стандартный прогон 30 с (камера 60 FPS, 
 OUT="$(run_on_board)"
 echo "$OUT"
 
+# Полный путь: РЕАЛЬНЫЙ NPU-детектор (без --demo-detect-фантома) —
+# накрывает клон кадра в канал, letterbox, декодер (аудит 2026-09-10:
+# стандартный bench этот путь не проверял вовсе).
+if [[ "${1:-}" == "--full" ]]; then
+  echo "== bench: полный путь (реальный детектор) =="
+  ssh -o BatchMode=yes "radxa@$IP" "cd $REMOTE_DIR && rm -rf data &&     ./target/release/synergy --config bench.toml --duration 30 2>/dev/null     | grep -aE 'ИТОГ|кадров|track|TRACKING|детек' ;     python3 tools/telemetry_report.py data/telemetry.jsonl"
+fi
+
 # Сохранение эталона
 if [[ "${1:-}" == "--save" ]]; then
   ssh -o BatchMode=yes "radxa@$IP" "echo '$OUT' > $REMOTE_DIR/bench_baseline.txt"

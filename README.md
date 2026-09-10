@@ -141,7 +141,7 @@ CLI flags: `--config PATH`, `--synthetic`, `--duration SEC`, `--demo-detect`,
 ## Testing
 
 ```bash
-cargo test --workspace      # 69 unit tests (decoder, PID, MSP, stabilization…)
+cargo test --workspace      # 73 unit tests (decoder, PID, MSP, demosaic parity, decode floor…)
 cargo clippy --workspace    # CI enforces zero warnings
 ```
 

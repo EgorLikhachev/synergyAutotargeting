@@ -12,3 +12,8 @@ backend = "rknn"
 [commander]
 enabled = true
 rate_hz = 30
+
+[logging]
+# diag: telemetry.jsonl/perf.jsonl пишутся — telemetry_report.py в bench.sh
+# без них читает пустоту (аудит 2026-09-10).
+mode = "diag"
