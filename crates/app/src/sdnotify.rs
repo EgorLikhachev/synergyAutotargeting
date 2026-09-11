@@ -104,14 +104,23 @@ mod tests {
         let path = dir.join("notify.sock");
         let _ = std::fs::remove_file(&path);
         let listener = UnixDatagram::bind(&path).unwrap();
+        // fail-fast: без таймаута ожидание неотправленного сообщения вешает
+        // тест (а с ним и CI-раннер) навсегда — что и случалось (2026-09-11).
+        listener
+            .set_read_timeout(Some(std::time::Duration::from_secs(3)))
+            .unwrap();
         std::env::set_var("NOTIFY_SOCKET", &path);
         std::env::set_var("WATCHDOG_USEC", "300000");
         let mut wd = SdWatchdog::from_env();
         wd.ready();
-        wd.kick();
         let mut buf = [0u8; 64];
         let (n, _) = listener.recv_from(&mut buf).unwrap();
         assert_eq!(&buf[..n], b"READY=1");
+        // kick() рейт-лимитирован: интервал = max(WatchdogSec/2, 250 мс)
+        // с момента from_env — сразу после ready() он ничего НЕ шлёт
+        // (прежняя версия теста ждала WATCHDOG=1 немедленно и висела).
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        wd.kick();
         let (n, _) = listener.recv_from(&mut buf).unwrap();
         assert_eq!(&buf[..n], b"WATCHDOG=1");
         let _ = std::fs::remove_file(&path);
