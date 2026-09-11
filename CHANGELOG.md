@@ -25,6 +25,26 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
   immediate-switch behavior.
 
 ### Fixed
+- CI test job hung forever on Linux since ADR-019: the sdnotify test
+  expected an immediate WATCHDOG=1, but kick() is rate-limited
+  (max(WatchdogSec/2, 250 ms)) and sends nothing on the first call — the
+  second recv_from blocked eternally (invisible on Windows: cfg(unix)).
+  Diagnosed via WSL reproduction + strace; fixed with a 3 s read timeout
+  and a 300 ms interval wait. Full Linux suite now runs in seconds.
+- Linux-only clippy warnings (invisible on the Windows host) failed the
+  CI gate after the hang was fixed: v4l2 too_many_arguments, unused
+  Write import in the H.264 spawner, dead fps init in run_camera,
+  diag::dir() dead_code. CI green since f17e495.
+- GRBG demosaic: the audit's row-based rewrite REVERTED by target-
+  hardware measurement (ADR-024): 2.06 ms/frame on A76 vs 0.89 ms for
+  the original per-pixel code (LLVM-aarch64 auto-vectorizes the simple
+  pattern; the bool-match blocked it). x86 benchmarks are unreliable
+  even qualitatively for aarch64 decisions.
+- Board validation of the audit pass (2026-09-11): e2e (status) 9→1.6
+  ms, dec p95 4.37→1.13 ms, e2e p95 20.8→10.46 ms, RSS −27%, FPS
+  60.4/60.6 in both bench modes (incl. the real detector in LOST), 1 h
+  express soak passed (flat 50 MB RSS), replay within noise of the R4
+  baseline; bench baseline saved on the board.
 - CI clippy gate (`-D warnings`) made truthful: 34 accumulated warnings
   fixed — mechanical lints auto-applied (useless conversions/casts,
   derivable `Default` impls, doc-quote markers, `-1` multiplication),
