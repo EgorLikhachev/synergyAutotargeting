@@ -58,6 +58,8 @@ struct OperatorApp {
     lost_since: Option<std::time::Instant>,
     /// Начало текущей записи (таймер REC на экране).
     rec_since: Option<std::time::Instant>,
+    /// Цифровой зум видео (×1..×4, колесо мыши, центр кадра).
+    zoom: f32,
     /// Последний установленный заголовок окна (не слать команду зря).
     last_title: String,
 }
@@ -88,6 +90,7 @@ impl OperatorApp {
             mode_since: std::time::Instant::now(),
             lost_since: None,
             rec_since: None,
+            zoom: 1.0,
             last_title: String::new(),
         }
     }
@@ -100,18 +103,23 @@ impl OperatorApp {
             .unwrap_or_else(|| std::path::PathBuf::from("records"))
     }
 
-    /// Экранная точка → координаты кадра (учёт letterbox/масштаба).
+    /// Экранная точка → координаты кадра (letterbox + зум вокруг центра).
     fn screen_to_frame(&self, p: Pos2) -> Option<(f32, f32)> {
         let r = self.video_rect?;
         let (fw, fh) = (self.frame_wh.0 as f32, self.frame_wh.1 as f32);
         let scale = (r.width() / fw).min(r.height() / fh);
         let vw = fw * scale;
         let vh = fh * scale;
-        let ox = r.left() + (r.width() - vw) / 2.0;
-        let oy = r.top() + (r.height() - vh) / 2.0;
-        let fx = (p.x - ox) / scale;
-        let fy = (p.y - oy) / scale;
-        (fx >= 0.0 && fy >= 0.0 && fx < fw && fy < fh).then_some((fx, fy))
+        let cx = r.left() + (r.width() - vw) / 2.0 + vw / 2.0;
+        let cy = r.top() + (r.height() - vh) / 2.0 + vh / 2.0;
+        let fx = (p.x - cx) / (scale * self.zoom) + fw / 2.0;
+        let fy = (p.y - cy) / (scale * self.zoom) + fh / 2.0;
+        let (hw, hh) = (fw / (2.0 * self.zoom), fh / (2.0 * self.zoom));
+        (fx >= fw / 2.0 - hw
+            && fy >= fh / 2.0 - hh
+            && fx <= fw / 2.0 + hw
+            && fy <= fh / 2.0 + hh)
+            .then_some((fx, fy))
     }
 
     fn frame_to_screen(&self, x: f32, y: f32) -> Option<Pos2> {
@@ -120,9 +128,12 @@ impl OperatorApp {
         let scale = (r.width() / fw).min(r.height() / fh);
         let vw = fw * scale;
         let vh = fh * scale;
-        let ox = r.left() + (r.width() - vw) / 2.0;
-        let oy = r.top() + (r.height() - vh) / 2.0;
-        Some(Pos2::new(ox + x * scale, oy + y * scale))
+        let cx = r.left() + (r.width() - vw) / 2.0 + vw / 2.0;
+        let cy = r.top() + (r.height() - vh) / 2.0 + vh / 2.0;
+        Some(Pos2::new(
+            cx + (x - fw / 2.0) * scale * self.zoom,
+            cy + (y - fh / 2.0) * scale * self.zoom,
+        ))
     }
 
     /// (scale, rect видео в экране) для letterbox-отрисовки.
@@ -237,6 +248,16 @@ impl eframe::App for OperatorApp {
         if ctx.input(|i| i.key_pressed(egui::Key::R)) && video_ok {
             self.toggle_recording();
         }
+        // X — снять захват (как кнопка «× СНЯТЬ ЗАХВАТ», только с клавиатуры).
+        if ctx.input(|i| i.key_pressed(egui::Key::X)) && ctl_ok {
+            let engaged = matches!(
+                status.as_ref().map(|s| s.mode.as_str()),
+                Some("TRACK") | Some("ACQUIRE") | Some("LOST")
+            );
+            if engaged {
+                self.net.send(UiCommand::Unlock);
+            }
+        }
 
         // Автостоп записи при ошибке диска (писатель умер).
         {
@@ -332,37 +353,95 @@ impl eframe::App for OperatorApp {
         // Нижняя панель: статус + кнопки
         egui::TopBottomPanel::bottom("bottom").show(ctx, |ui| {
             ui.add_space(6.0);
-            // строка статуса
+            // Приборный ряд: режим-лампа + score-градусник + fps/e2e с
+            // цветовой кодировкой по порогам + компактный FC. Зелёное =
+            // норма, янтарь = внимание, красное = проблема — читается
+            // одним взглядом без разбора текста.
+            let (mode_col, mode_txt) = match status.as_ref().map(|s| s.mode.as_str()) {
+                Some("TRACK") => (Color32::from_rgb(60, 220, 90), "TRACK"),
+                Some("ACQUIRE") => (Color32::from_rgb(80, 200, 255), "ACQUIRE"),
+                Some("LOST") => (Color32::from_rgb(255, 90, 90), "LOST"),
+                Some("IDLE") => (Color32::GRAY, "ОЖИДАНИЕ"),
+                _ => (Color32::GRAY, "—"),
+            };
+            let (green, amber, red) = (
+                Color32::from_rgb(90, 200, 90),
+                Color32::from_rgb(230, 170, 40),
+                Color32::from_rgb(220, 70, 70),
+            );
+            // Почему FC не вооружится (ADR-021): считаем один раз — чип в
+            // приборе, полный список в «стенд»-секции.
+            let blockers = status
+                .as_ref()
+                .filter(|s| !s.armed)
+                .and_then(|s| s.fc.as_ref())
+                .map(|fc| commander::msp::arming_disable_names(fc.flags))
+                .unwrap_or_default();
             ui.horizontal(|ui| {
-                let (mode_col, mode_txt) = match status.as_ref().map(|s| s.mode.as_str()) {
-                    Some("TRACK") => (Color32::from_rgb(60, 220, 90), "TRACK"),
-                    Some("ACQUIRE") => (Color32::from_rgb(80, 200, 255), "ACQUIRE"),
-                    Some("LOST") => (Color32::from_rgb(255, 90, 90), "LOST"),
-                    Some("IDLE") => (Color32::GRAY, "ОЖИДАНИЕ"),
-                    _ => (Color32::GRAY, "—"),
-                };
-                ui.colored_label(mode_col, egui::RichText::new(mode_txt).size(22.0).strong());
+                ui.colored_label(mode_col, egui::RichText::new(mode_txt).size(20.0).strong());
                 if let Some(s) = &status {
-                    ui.label(format!(
-                        "score {:.2} · FPS {:.0} · e2e {:.1} мс · дет: {} · кадр {}",
-                        s.score, s.fps, s.e2e_ms, s.dets.len(), s.frame_seq
-                    ));
-                    // Возраст данных: зависший борт виден сразу
-                    if let Some(age) = status_age {
-                        if age > 2.0 {
-                            ui.label(
-                                egui::RichText::new(format!("данные {age:.0} с назад"))
-                                    .size(14.0)
-                                    .color(Color32::from_rgb(220, 180, 60)),
-                            );
-                        }
-                    }
+                    let sc = s.score.clamp(0.0, 1.0);
+                    let scol = if sc >= 0.5 { green } else if sc >= 0.3 { amber } else { red };
+                    ui.add(
+                        egui::ProgressBar::new(sc)
+                            .desired_width(88.0)
+                            .text(format!("score {:.2}", s.score))
+                            .fill(scol),
+                    );
+                    let fcol = if s.fps >= 50.0 { green } else if s.fps >= 40.0 { amber } else { red };
+                    ui.colored_label(fcol, egui::RichText::new(format!("{:.0} fps", s.fps)).size(15.0));
+                    let ecol = if s.e2e_ms < 6.0 { green } else if s.e2e_ms < 12.0 { amber } else { red };
+                    ui.colored_label(ecol, egui::RichText::new(format!("e2e {:.1} мс", s.e2e_ms)).size(15.0));
+                    ui.weak(format!("дет {} · кадр {}", s.dets.len(), s.frame_seq));
                 } else if ctl_ok {
                     ui.weak("нет данных от борта");
                 } else {
                     ui.weak("канал управления потерян");
                 }
+                // Компактный FC: ✓ связь + ✓ RC-поток.
+                match status.as_ref().and_then(|s| s.fc.as_ref()) {
+                    Some(fc) if fc.online && fc.rx_ok => {
+                        ui.colored_label(green, egui::RichText::new("FC ✓RC").size(14.0).strong());
+                    }
+                    Some(fc) if fc.online => {
+                        ui.colored_label(
+                            amber,
+                            egui::RichText::new("FC ✓·RC ✗").size(14.0).strong(),
+                        );
+                    }
+                    Some(_) => {
+                        ui.colored_label(red, egui::RichText::new("FC ✗").size(14.0).strong());
+                    }
+                    None => {}
+                }
+                if !blockers.is_empty() {
+                    let extra = blockers.len() - 1;
+                    let t = if extra > 0 {
+                        format!("АРМ-блок: {} (+{extra})", blockers[0])
+                    } else {
+                        format!("АРМ-блок: {}", blockers[0])
+                    };
+                    ui.colored_label(
+                        Color32::from_rgb(220, 180, 60),
+                        egui::RichText::new(t).size(12.0),
+                    );
+                }
+                // Возраст данных: зависший борт виден сразу
+                if let Some(age) = status_age {
+                    if age > 2.0 {
+                        ui.label(
+                            egui::RichText::new(format!("данные {age:.0} с назад"))
+                                .size(14.0)
+                                .color(Color32::from_rgb(220, 180, 60)),
+                        );
+                    }
+                }
             });
+            // Стенд-секция: детали FC (полное состояние + эхо каналов
+            // MSP_RC + полный список блокировок арма). В поле свёрнута.
+            egui::CollapsingHeader::new("стенд: FC · RC-эхо · АРМ-блок")
+                .default_open(false)
+                .show(ui, |ui| {
             // Индикатор FC (ADR-021): видит ли полётник наш RC-поток.
             match status.as_ref().and_then(|s| s.fc.as_ref()) {
                 Some(fc) if fc.online => {
@@ -430,6 +509,7 @@ impl eframe::App for OperatorApp {
                 }
                 None => {}
             }
+                });
             ui.add_space(4.0);
             // кнопки
             ui.horizontal(|ui| {
@@ -599,12 +679,23 @@ impl eframe::App for OperatorApp {
             let avail = ui.available_size();
             let (rect, resp) = ui.allocate_exact_size(avail, Sense::click());
             self.video_rect = Some(rect);
+            // Зум колесом (×1..×4, вокруг центра кадра): разглядеть мелкую
+            // цель. Клик-захват работает и в зуме (маппинг учитывает его).
+            let scroll = ctx.input(|i| i.smooth_scroll_delta.y);
+            if resp.hovered() && scroll != 0.0 {
+                self.zoom = (self.zoom * if scroll > 0.0 { 1.15 } else { 1.0 / 1.15 })
+                    .clamp(1.0, 4.0);
+            }
             // letterbox-подгонка текстуры под фактический размер кадра
             let (scale, vrect) = self.video_geom(rect);
             ui.painter().rect_filled(rect, 0.0, ui.visuals().panel_fill);
             if video_ok {
-                ui.painter()
-                    .image(self.texture.id(), vrect, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
+                let half = 0.5 - 0.5 / self.zoom;
+                let uv = Rect::from_min_max(
+                    Pos2::new(half, half),
+                    Pos2::new(1.0 - half, 1.0 - half),
+                );
+                ui.painter().image(self.texture.id(), vrect, uv, Color32::WHITE);
             } else {
                 ui.painter().text(
                     rect.center(),
@@ -620,8 +711,8 @@ impl eframe::App for OperatorApp {
                 for d in &s.dets {
                     if let Some(p) = self.frame_to_screen(d.0, d.1) {
                         let wh = Pos2::new(
-                            p.x + d.2 * scale,
-                            p.y + d.3 * scale,
+                            p.x + d.2 * scale * self.zoom,
+                            p.y + d.3 * scale * self.zoom,
                         );
                         ui.painter().rect_stroke(
                             Rect::from_two_pos(p, wh),
@@ -637,7 +728,10 @@ impl eframe::App for OperatorApp {
                         _ => Color32::from_rgb(255, 90, 90),
                     };
                     if let Some(p) = self.frame_to_screen(b[0] as f32, b[1] as f32) {
-                        let wh = Pos2::new(p.x + b[2] as f32 * scale, p.y + b[3] as f32 * scale);
+                        let wh = Pos2::new(
+                            p.x + b[2] as f32 * scale * self.zoom,
+                            p.y + b[3] as f32 * scale * self.zoom,
+                        );
                         ui.painter().rect_stroke(
                             Rect::from_two_pos(p, wh),
                             0.0,
@@ -691,7 +785,7 @@ impl eframe::App for OperatorApp {
                     (Pos2::new(c.x, c.y - 18.0), Pos2::new(c.x, c.y - 7.0)),
                     (Pos2::new(c.x, c.y + 7.0), Pos2::new(c.x, c.y + 18.0)),
                 ] {
-                    ui.painter().line_segment([seg.0, seg.1], Stroke::new(1.5_f32, cyan));
+                    ui.painter().line_segment([seg.0, seg.1], Stroke::new(2.0_f32, cyan));
                 }
                 let in_tol = status.as_ref().and_then(|s| s.box_xywh).map(|b| {
                     let (bx, by) =
@@ -705,8 +799,11 @@ impl eframe::App for OperatorApp {
                 } else {
                     Color32::from_rgb(255, 170, 0) // вне допуска / цели нет
                 };
-                ui.painter()
-                    .circle_stroke(c, 30.0 * scale, Stroke::new(1.5_f32, tol_col));
+                ui.painter().circle_stroke(
+                    c,
+                    30.0 * scale * self.zoom,
+                    Stroke::new(2.0_f32, tol_col),
+                );
 
                 // 2) Бейдж режима + таймер удержания/потери (периферийное
                 //    зрение оператора: состояние без чтения нижней панели).
@@ -737,9 +834,14 @@ impl eframe::App for OperatorApp {
                 };
                 let anchor = vrect.left_top() + Vec2::new(10.0, 10.0);
                 let badge = |anchor: Pos2, text: String, col: Color32, size: f32| {
+                    let align = if anchor.x > vrect.center().x {
+                        egui::Align2::RIGHT_TOP
+                    } else {
+                        egui::Align2::LEFT_TOP
+                    };
                     let tr = ui.painter().text(
                         anchor,
-                        egui::Align2::LEFT_TOP,
+                        align,
                         text.clone(),
                         egui::FontId::proportional(size),
                         col,
@@ -753,7 +855,7 @@ impl eframe::App for OperatorApp {
                         .rect_stroke(tr.expand(6.0), 4.0, Stroke::new(1.5_f32, col));
                     ui.painter().text(
                         anchor,
-                        egui::Align2::LEFT_TOP,
+                        align,
                         text,
                         egui::FontId::proportional(size),
                         col,
@@ -761,6 +863,16 @@ impl eframe::App for OperatorApp {
                     tr
                 };
                 let tr_mode = badge(anchor, text, mcol, 22.0);
+
+                // 2б) Индикатор зума (только когда включён).
+                if self.zoom > 1.01 {
+                    badge(
+                        vrect.right_top() + Vec2::new(-10.0, 10.0),
+                        format!("×{:.1}", self.zoom),
+                        cyan,
+                        18.0,
+                    );
+                }
 
                 // 3) REC-таймер под бейджем режима.
                 if let Some(rs) = self.rec_since {

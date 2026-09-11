@@ -204,6 +204,21 @@ def main():
     line = wait_journal(m, "UI: СТОП наведения", timeout_s=10)
     check("клавиша Esc: СТОП наведения (журнал)", bool(line), line[:90])
 
+    # --- 3б. X = СНЯТЬ ЗАХВАТ ---
+    # X активен только при живом захвате (TRACK/ACQUIRE/LOST); после
+    # предыдущих прогонов режим может быть IDLE — сначала захват
+    # двойным кликом в центр видео.
+    rc = window_rect(hwnd)
+    focus(hwnd)
+    click(rc.l + (rc.r - rc.l) * 0.5, rc.t + (rc.b - rc.t) * 0.45)
+    time.sleep(0.12)
+    click(rc.l + (rc.r - rc.l) * 0.5, rc.t + (rc.b - rc.t) * 0.45)
+    time.sleep(1.5)  # режим -> ACQUIRE/LOST
+    m = board_utc()
+    send_key(0x58)  # X
+    line = wait_journal(m, "UI: СНЯТЬ ЗАХВАТ", timeout_s=10)
+    check("клавиша X: СНЯТЬ ЗАХВАТ (после захвата кликом)", bool(line), line[:90])
+
     # --- 4. АРМ в 2 клика -----------------------------------------------------
     rc = window_rect(hwnd)
     focus(hwnd)

@@ -127,6 +127,19 @@ def count_color(img, rgb, tol=TOL):
     return n
 
 
+def count_hue(img, pred):
+    """Сколько пикселей удовлетворяет предикату (r,g,b) -> bool.
+    Устойчиво к антиалиасингу тонких линий поверх видео."""
+    w, h = img.size
+    px = img.load()
+    return sum(
+        1
+        for y in range(0, h, 2)
+        for x in range(0, w, 2)
+        if pred(px[x, y])
+    )
+
+
 def main():
     os.makedirs(SHOTS, exist_ok=True)
     if "active" not in ssh("systemctl is-active synergy"):
@@ -145,7 +158,9 @@ def main():
 
     # --- Снимок 1: базовые оверлеи ----------------------------------------
     img = shot(hwnd, "v1_overlays.png")
-    n_cyan = count_color(img, CYAN)
+    n_cyan = count_hue(
+        img, lambda p: p[2] > 180 and p[1] > 130 and p[0] < 110 and p[2] - p[0] > 80
+    )
     check("прицел-крест (cyan) в центре кадра", n_cyan >= 8, f"{n_cyan} px")
     n_amber = count_color(img, TOL_AMBER)
     n_tg = count_color(img, TOL_GREEN)
@@ -154,6 +169,26 @@ def main():
     n_mode = count_color(img, TRACK_GREEN) + count_color(img, LOST_RED)
     check("бейдж режима с рамкой (TRACK/LOST цвет)", n_mode >= 12,
           f"{n_mode} px")
+
+    # --- Зум колесом: бейдж ×N появляется, циана становится больше ----------
+    focus(hwnd)
+    rcz = window_rect(hwnd)
+    user32.SetCursorPos(int(rcz.l + (rcz.r - rcz.l) * 0.5),
+                        int(rcz.t + (rcz.b - rcz.t) * 0.45))
+    for _ in range(4):
+        user32.mouse_event(0x0800, 0, 0, 120, 0)  # wheel up
+        time.sleep(0.15)
+    time.sleep(0.8)
+    img = shot(hwnd, "v1b_zoom.png")
+    n_cyan2 = count_hue(
+        img, lambda p: p[2] > 180 and p[1] > 130 and p[0] < 110 and p[2] - p[0] > 80
+    )
+    check("зум колесом: бейдж ×N (циана больше)", n_cyan2 > n_cyan + 5,
+          f"было {n_cyan}, стало {n_cyan2}")
+    for _ in range(8):  # вернуть ×1
+        user32.mouse_event(0x0800, 0, 0, -120, 0)
+        time.sleep(0.1)
+    time.sleep(0.5)
 
     # --- Снимок 2: запись ----------------------------------------------------
     focus(hwnd)

@@ -7,6 +7,17 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Operator UX, part 2 (P2, sound deliberately excluded — demasking):
+  digital zoom ×1..×4 over the mouse wheel (UV-crop around the frame
+  center; click-to-lock and all overlays map through the zoom, the
+  ±30 px tolerance ring scales accordingly, a ×N badge appears top-right);
+  an instrument status row (mode lamp, score gauge, fps/e2e color-coded
+  by thresholds, compact FC ✓RC chip, arm-blocker chip, data-age warning)
+  replacing the plain text line; FC details (RC-echo bars, full
+  arming-blocker list) moved into a collapsible "стенд" section;
+  X hotkey for СНЯТЬ ЗАХВАТ (mirrors the button, engaged-only; the board
+  now logs "UI: СНЯТЬ ЗАХВАТ" for testability). Visual suite extended to
+  10/10 (zoom included), functional suite 12/12.
 - Operator UX overlays (P1): center crosshair with a gap + the ±30 px
   tolerance ring (green when the target is inside the aim tolerance,
   amber otherwise — the phase-D hold criterion made visible); a mode

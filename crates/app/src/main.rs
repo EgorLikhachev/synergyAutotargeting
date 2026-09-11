@@ -847,6 +847,7 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
                         tracing::info!("UI: СТОП наведения");
                     }
                     control::UiCmd::Unlock => {
+                        tracing::info!("UI: СНЯТЬ ЗАХВАТ");
                         hybrid.unlock();
                         tracing::info!("UI: захват снят оператором (до следующего lock)");
                     }
