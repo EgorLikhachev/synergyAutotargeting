@@ -449,98 +449,49 @@ pub fn demosaic_grbg_to_rgb24(frame: &Frame) -> ConversionResult<Frame> {
         });
     }
 
+    // ВЕРСИЯ ВОЗВРАЩЕНА 2026-09-11: построчная переписка (d62f6a8) на
+    // A76 оказалась в 2.3x МЕДЛЕННЕЕ (2.06 против 0.89 мс/кадр,
+    // grbg_demosaic_bench на борту): LLVM-aarch64 лучше векторизует
+    // простой попиксельный паттерн, булев-match блокирует автолевектор.
+    // Эталонная копия для сравнения — в тестах (grbg_reference).
     let src = &frame.data;
+    let px = |x: usize, y: usize| src[y * w + x] as u32;
     let mut rgb = vec![0u8; w * h * 3];
 
-    // === Границы (первая/последняя строка и столбец) — прежняя логика с
-    // clamp: доля пикселей ~2*(w+h)/w*h пренебрежима, зато семантика
-    // краёв сохранена дословно. ===
-    let px = |x: usize, y: usize| src[y * w + x] as u32;
-    let mut edge = |x: usize, y: usize| {
+    for y in 0..h {
         let (yu, yd) = (y.saturating_sub(1), (y + 1).min(h - 1));
-        let (xl, xr) = (x.saturating_sub(1), (x + 1).min(w - 1));
-        let (r, g, b) = match (x % 2, y % 2) {
-            (0, 0) => (
-                (px(xl, y) + px(xr, y)) / 2,
-                px(x, y),
-                (px(x, yu) + px(x, yd)) / 2,
-            ),
-            (1, 0) => (
-                px(x, y),
-                (px(xl, y) + px(xr, y)) / 2,
-                (px(xl, yu) + px(xr, yu) + px(xl, yd) + px(xr, yd)) / 4,
-            ),
-            (0, 1) => (
-                (px(xl, yu) + px(xr, yu) + px(xl, yd) + px(xr, yd)) / 4,
-                (px(x, yu) + px(x, yd)) / 2,
-                px(x, y),
-            ),
-            _ => (
-                (px(x, yu) + px(x, yd)) / 2,
-                px(x, y),
-                (px(xl, y) + px(xr, y)) / 2,
-            ),
-        };
-        let i = (y * w + x) * 3;
-        rgb[i] = r as u8;
-        rgb[i + 1] = g as u8;
-        rgb[i + 2] = b as u8;
-    };
-    for x in 0..w {
-        edge(x, 0);
-        edge(x, h - 1);
-    }
-    for y in 1..h - 1 {
-        edge(0, y);
-        edge(w - 1, y);
-    }
-
-    // === Интерьер: пары строк через срезы, чёт/нечёт столбцы разведены в
-    // отдельные проходы — ни match, ни %, ни clamp, ни пересчёта границ на
-    // пиксель (аудит 2026-09-10: прежний попиксельный код ~2-4 мс/кадр).
-    // Арифметика (суммы и деления) идентична прежней — вывод бит-в-бит. ===
-    for y in 1..h - 1 {
-        let row_up = &src[(y - 1) * w..(y - 1) * w + w];
-        let row = &src[y * w..y * w + w];
-        let row_dn = &src[(y + 1) * w..(y + 1) * w + w];
-        let out_row = &mut rgb[y * w * 3..(y + 1) * w * 3];
-        let even_row = y % 2 == 0;
-        // Два прохода по столбцам: чётные и нечётные — каждая комбинация
-        // (чёт/нечёт строки × столбца) = один паттерн Байера.
-        for x in 1..w - 1 {
-            let i3 = x * 3;
-            let (xl, xr) = (x - 1, x + 1);
-            let (u, c, d) = (row_up[x] as u32, row[x] as u32, row_dn[x] as u32);
-            match (x % 2 == 0, even_row) {
-                // G (чёт-столбец, чёт-строка): R — горизонталь, B — вертикаль.
-                (true, true) => {
-                    out_row[i3] = ((row[xl] as u32 + row[xr] as u32) / 2) as u8;
-                    out_row[i3 + 1] = c as u8;
-                    out_row[i3 + 2] = ((u + d) / 2) as u8;
-                }
-                // R (неч-столбец, чёт-строка): G — горизонталь, B — диагонали.
-                (false, true) => {
-                    out_row[i3] = c as u8;
-                    out_row[i3 + 1] = ((row[xl] as u32 + row[xr] as u32) / 2) as u8;
-                    out_row[i3 + 2] = ((row_up[xl] as u32 + row_up[xr] as u32
-                        + row_dn[xl] as u32 + row_dn[xr] as u32)
-                        / 4) as u8;
-                }
-                // B (чёт-столбец, нечёт-строка): G — вертикаль, R — диагонали.
-                (true, false) => {
-                    out_row[i3] = ((row_up[xl] as u32 + row_up[xr] as u32
-                        + row_dn[xl] as u32 + row_dn[xr] as u32)
-                        / 4) as u8;
-                    out_row[i3 + 1] = ((u + d) / 2) as u8;
-                    out_row[i3 + 2] = c as u8;
-                }
-                // G (неч-столбец, нечёт-строка): R — вертикаль, B — горизонталь.
-                (false, false) => {
-                    out_row[i3] = ((u + d) / 2) as u8;
-                    out_row[i3 + 1] = c as u8;
-                    out_row[i3 + 2] = ((row[xl] as u32 + row[xr] as u32) / 2) as u8;
-                }
-            }
+        for x in 0..w {
+            let (xl, xr) = (x.saturating_sub(1), (x + 1).min(w - 1));
+            let i = (y * w + x) * 3;
+            let (r, g, b) = match (x % 2, y % 2) {
+                // G (чёт,чёт): R — горизонталь, B — вертикаль.
+                (0, 0) => (
+                    (px(xl, y) + px(xr, y)) / 2,
+                    px(x, y),
+                    (px(x, yu) + px(x, yd)) / 2,
+                ),
+                // R (неч,чёт): G — горизонталь, B — диагонали.
+                (1, 0) => (
+                    px(x, y),
+                    (px(xl, y) + px(xr, y)) / 2,
+                    (px(xl, yu) + px(xr, yu) + px(xl, yd) + px(xr, yd)) / 4,
+                ),
+                // B (чёт,неч): G — вертикаль, R — диагонали.
+                (0, 1) => (
+                    (px(xl, yu) + px(xr, yu) + px(xl, yd) + px(xr, yd)) / 4,
+                    (px(x, yu) + px(x, yd)) / 2,
+                    px(x, y),
+                ),
+                // G (неч,неч): R — вертикаль, B — горизонталь.
+                _ => (
+                    (px(x, yu) + px(x, yd)) / 2,
+                    px(x, y),
+                    (px(xl, y) + px(xr, y)) / 2,
+                ),
+            };
+            rgb[i] = r as u8;
+            rgb[i + 1] = g as u8;
+            rgb[i + 2] = b as u8;
         }
     }
 
