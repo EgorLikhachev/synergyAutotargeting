@@ -7,13 +7,14 @@ USB VCP — proven on the bench — or UART). The runtime is **100% Rust** — n
 
 ![CI](https://github.com/EgorLikhachev/synergyAutotargeting/actions/workflows/ci.yml/badge.svg)
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Version](https://img.shields.io/badge/version-0.1.0-orange.svg)
+![Version](https://img.shields.io/badge/version-0.2.0-orange.svg)
 ![Rust](https://img.shields.io/badge/rust-1.75%2B-blue?logo=rust)
 
-> Measured on hardware: **60 FPS** pipeline (640×480), tracking **6.2 ms/frame**
-> on the NPU, detection **32 ms** on a separate NPU core, end-to-end
-> frame→box latency **10.6 ms**. See
-> [docs/HARDWARE_TEST_RESULTS.md](docs/HARDWARE_TEST_RESULTS.md).
+> Measured on hardware (v0.2.0, bench 2026-09-11): **60 FPS** pipeline
+> (640×480), tracking **6.7 ms** on a dedicated NPU core (p95 6.9),
+> frame→box e2e **1.6 ms** median / **10.5 ms** p95, demosaic < 1 ms,
+> RSS **37-50 MB** (was 50-51), stable for hours (8 h soak passed).
+> See [docs/HARDWARE_TEST_RESULTS.md](docs/HARDWARE_TEST_RESULTS.md).
 
 ## Table of contents
 

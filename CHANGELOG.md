@@ -6,6 +6,8 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-11
+
 ### Added
 - Arming-disable flags decoded in the UI (ADR-021 refinement): the exact
   BF 4.4.3 armingDisableFlags table (26 flags, runtime_config.h) now
@@ -232,5 +234,6 @@ validated end-to-end on a Radxa ROCK 5A.
 - On the vendor kernel, inbound TCP to user-space listeners fails while the
   NPU is active — use push-mode streaming or an SSH tunnel [ADR-009].
 
-[Unreleased]: https://github.com/EgorLikhachev/synergyAutotargeting/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/EgorLikhachev/synergyAutotargeting/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/EgorLikhachev/synergyAutotargeting/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/EgorLikhachev/synergyAutotargeting/releases/tag/v0.1.0
