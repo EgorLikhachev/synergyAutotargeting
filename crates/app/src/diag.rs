@@ -87,8 +87,9 @@ impl DiagSink {
         self.dir.is_some()
     }
 
-    /// Каталог прогона (для снапшотов и отчёта).
-    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    /// Каталог прогона (для снапшотов и отчёта). Доступен снаружи для
+    /// стендовых скриптов; в боевой сборке не вызывается.
+    #[allow(dead_code)]
     pub fn dir(&self) -> Option<&PathBuf> {
         self.dir.as_ref()
     }

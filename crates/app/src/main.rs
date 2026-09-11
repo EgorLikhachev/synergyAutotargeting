@@ -1178,7 +1178,8 @@ tracing::debug!(seq, infer_ms, dets = dets.len(), "детекция готова
 
             let started = Instant::now();
             let mut last_dets: Vec<Detection> = Vec::new();
-            let (mut fps, mut track_ms, mut det_ms) = (0f32, 0f32, None);
+            let (mut track_ms, mut det_ms) = (0f32, None);
+            let mut fps;
             let mut fps_counter = FpsCounter::new();
             let mut perf = PerfState::new();
             // Сбойный режим 3×3: периодическая проверка каждые 150 кадров
@@ -1573,7 +1574,6 @@ impl FpsCounter {
 /// mpph264enc → matroskamux → файл. Возвращает ребёнка и stdin.
 #[cfg(target_os = "linux")]
 fn spawn_h264_gst(path: &str) -> Result<(std::process::Child, std::process::ChildStdin)> {
-    use std::io::Write as _;
     use std::process::{Command, Stdio};
     let mut child = Command::new("gst-launch-1.0")
         .args([

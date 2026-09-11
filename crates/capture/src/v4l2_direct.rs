@@ -236,6 +236,7 @@ impl VideoSource for V4l2DirectSource {
     }
 }
 
+#[allow(clippy::too_many_arguments)] // параметры захвата V4L2: устройство+формат+каналы
 fn run_direct_capture(
     device_path: &str,
     width: u32,
