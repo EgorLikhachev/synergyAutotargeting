@@ -52,6 +52,12 @@ struct OperatorApp {
     rec_error: Option<(String, std::time::Instant)>,
     /// «Нет связи» после клика СТОП (показываем ~3 с).
     no_link_flash: Option<std::time::Instant>,
+    /// Режим с последней смены (таймеры удержания/потери на экране).
+    last_mode: String,
+    mode_since: std::time::Instant,
+    lost_since: Option<std::time::Instant>,
+    /// Начало текущей записи (таймер REC на экране).
+    rec_since: Option<std::time::Instant>,
     /// Последний установленный заголовок окна (не слать команду зря).
     last_title: String,
 }
@@ -78,6 +84,10 @@ impl OperatorApp {
             last_rec: None,
             rec_error: None,
             no_link_flash: None,
+            last_mode: String::new(),
+            mode_since: std::time::Instant::now(),
+            lost_since: None,
+            rec_since: None,
             last_title: String::new(),
         }
     }
@@ -203,6 +213,18 @@ impl eframe::App for OperatorApp {
         let status_age = self.net.status_age_secs();
         let video_ok = self.net.video_connected();
         let ctl_ok = self.net.control_connected();
+
+        // Таймеры оверлеев: смена режима и старт/стоп записи.
+        if let Some(s) = status.as_ref() {
+            if s.mode != self.last_mode {
+                self.last_mode = s.mode.clone();
+                self.mode_since = std::time::Instant::now();
+                self.lost_since = (s.mode == "LOST").then(std::time::Instant::now);
+            }
+        }
+        let recording = self.net.recorder().is_recording();
+        self.rec_since = recording.then_some(std::time::Instant::now())
+            .filter(|_| recording);
 
         // Горячие клавиши оператора: Esc — СТОП наведения, F — полный
         // экран, R — запись. Работают в любом месте окна (полей ввода нет).
@@ -469,10 +491,27 @@ impl eframe::App for OperatorApp {
                         )
                         .fill(Color32::from_rgb(120, 90, 20))
                         .min_size(egui::vec2(170.0, 40.0));
-                        if ui.add(yes).clicked() {
+                        let resp = ui.add(yes);
+                        if resp.clicked() {
                             self.net.send(UiCommand::Arm { on: true });
                             self.arm_confirm = false;
                             self.arm_confirm_at = None;
+                        } else if let Some(t0) = self.arm_confirm_at {
+                            // Подтверждение гаснет через 4 с — показать
+                            // оператору, сколько времени на решение осталось.
+                            const ARM_CONFIRM_S: f32 = 4.0;
+                            let left =
+                                (ARM_CONFIRM_S - t0.elapsed().as_secs_f32()).max(0.0);
+                            let r = resp.rect;
+                            let w = r.width() * (left / ARM_CONFIRM_S);
+                            ui.painter().rect_filled(
+                                egui::Rect::from_min_size(
+                                    r.left_bottom() + egui::vec2(0.0, 3.0),
+                                    egui::vec2(w, 3.0),
+                                ),
+                                0.0,
+                                Color32::from_rgb(255, 170, 0),
+                            );
                         }
                     } else {
                         let arm = egui::Button::new(
@@ -633,6 +672,139 @@ impl eframe::App for OperatorApp {
                     );
                 } else {
                     self.lock_flash_ms = None;
+                }
+            }
+
+            // === Оверлеи оператора (UX P1): прицел+допуск, режим+таймеры,
+            // REC, АРМ-рамка. Цвета выбраны уникальными — их ищет
+            // tools/ui_visual_test.py (пиксельные проверки фич). ===
+            if video_ok {
+                let egui_t = ui.ctx().input(|i| i.time) as f32;
+
+                // 1) Прицел: крест с зазором в центре кадра + зона
+                //    допуска ±30 px (критерий удержания, фаза D).
+                let c = vrect.center();
+                let cyan = Color32::from_rgb(0, 210, 255);
+                for seg in [
+                    (Pos2::new(c.x - 18.0, c.y), Pos2::new(c.x - 7.0, c.y)),
+                    (Pos2::new(c.x + 7.0, c.y), Pos2::new(c.x + 18.0, c.y)),
+                    (Pos2::new(c.x, c.y - 18.0), Pos2::new(c.x, c.y - 7.0)),
+                    (Pos2::new(c.x, c.y + 7.0), Pos2::new(c.x, c.y + 18.0)),
+                ] {
+                    ui.painter().line_segment([seg.0, seg.1], Stroke::new(1.5_f32, cyan));
+                }
+                let in_tol = status.as_ref().and_then(|s| s.box_xywh).map(|b| {
+                    let (bx, by) =
+                        (b[0] as f32 + b[2] as f32 / 2.0, b[1] as f32 + b[3] as f32 / 2.0);
+                    let (fcx, fcy) =
+                        (self.frame_wh.0 as f32 / 2.0, self.frame_wh.1 as f32 / 2.0);
+                    ((bx - fcx).powi(2) + (by - fcy).powi(2)).sqrt() <= 30.0
+                });
+                let tol_col = if in_tol == Some(true) {
+                    Color32::from_rgb(40, 255, 120) // цель в допуске
+                } else {
+                    Color32::from_rgb(255, 170, 0) // вне допуска / цели нет
+                };
+                ui.painter()
+                    .circle_stroke(c, 30.0 * scale, Stroke::new(1.5_f32, tol_col));
+
+                // 2) Бейдж режима + таймер удержания/потери (периферийное
+                //    зрение оператора: состояние без чтения нижней панели).
+                let (mcol, text) = match status.as_ref().map(|s| s.mode.as_str()) {
+                    Some("TRACK") => (
+                        Color32::from_rgb(60, 220, 90),
+                        format!(
+                            "TRACK · {:.1} с",
+                            self.mode_since.elapsed().as_secs_f32()
+                        ),
+                    ),
+                    Some("ACQUIRE") => (
+                        Color32::from_rgb(80, 200, 255),
+                        format!(
+                            "ACQUIRE · {:.1} с",
+                            self.mode_since.elapsed().as_secs_f32()
+                        ),
+                    ),
+                    Some("LOST") => {
+                        let t = self
+                            .lost_since
+                            .map(|i| i.elapsed().as_secs_f32())
+                            .unwrap_or(0.0);
+                        (Color32::from_rgb(255, 90, 90), format!("ПОТЕРЯН · {t:.1} с"))
+                    }
+                    Some("IDLE") => (Color32::from_rgb(160, 160, 160), "ЗАХВАТ СНЯТ".into()),
+                    _ => (Color32::from_rgb(160, 160, 160), "нет данных".into()),
+                };
+                let anchor = vrect.left_top() + Vec2::new(10.0, 10.0);
+                let badge = |anchor: Pos2, text: String, col: Color32, size: f32| {
+                    let tr = ui.painter().text(
+                        anchor,
+                        egui::Align2::LEFT_TOP,
+                        text.clone(),
+                        egui::FontId::proportional(size),
+                        col,
+                    );
+                    ui.painter().rect_filled(
+                        tr.expand(6.0),
+                        4.0,
+                        Color32::from_rgba_premultiplied(15, 15, 18, 215),
+                    );
+                    ui.painter()
+                        .rect_stroke(tr.expand(6.0), 4.0, Stroke::new(1.5_f32, col));
+                    ui.painter().text(
+                        anchor,
+                        egui::Align2::LEFT_TOP,
+                        text,
+                        egui::FontId::proportional(size),
+                        col,
+                    );
+                    tr
+                };
+                let tr_mode = badge(anchor, text, mcol, 22.0);
+
+                // 3) REC-таймер под бейджем режима.
+                if let Some(rs) = self.rec_since {
+                    let blink = (egui_t * 2.0).fract() < 0.65;
+                    let e = rs.elapsed().as_secs();
+                    let dot = if blink { "● " } else { "  " };
+                    badge(
+                        anchor + Vec2::new(0.0, tr_mode.height() + 18.0),
+                        format!("{dot}REC {:02}:{:02}", e / 60, e % 60),
+                        Color32::from_rgb(255, 80, 80),
+                        18.0,
+                    );
+                }
+
+                // 4) АРМ: рамка кадра + плашка (видно боковым зрением).
+                if status.as_ref().is_some_and(|s| s.armed) {
+                    let blink = (egui_t * 2.0).fract() < 0.6;
+                    let red = if blink {
+                        Color32::from_rgb(220, 40, 40)
+                    } else {
+                        Color32::from_rgb(150, 26, 26)
+                    };
+                    ui.painter()
+                        .rect_stroke(vrect.shrink(3.0), 2.0, Stroke::new(6.0_f32, red));
+                    let a3 = vrect.center_top() + Vec2::new(0.0, 26.0);
+                    let tr3 = ui.painter().text(
+                        a3,
+                        egui::Align2::CENTER_CENTER,
+                        "НАВЕДЕНИЕ АКТИВНО",
+                        egui::FontId::proportional(20.0),
+                        Color32::WHITE,
+                    );
+                    ui.painter().rect_filled(
+                        tr3.expand(9.0),
+                        4.0,
+                        Color32::from_rgba_premultiplied(150, 25, 25, 235),
+                    );
+                    ui.painter().text(
+                        a3,
+                        egui::Align2::CENTER_CENTER,
+                        "НАВЕДЕНИЕ АКТИВНО",
+                        egui::FontId::proportional(20.0),
+                        Color32::WHITE,
+                    );
                 }
             }
 

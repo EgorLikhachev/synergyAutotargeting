@@ -6,6 +6,18 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Operator UX overlays (P1): center crosshair with a gap + the ±30 px
+  tolerance ring (green when the target is inside the aim tolerance,
+  amber otherwise — the phase-D hold criterion made visible); a mode
+  badge with hold/loss timers over the video (TRACK · 12.4 s / ПОТЕРЯН ·
+  1.8 с); an on-screen REC timer (mm:ss, blinking dot); a blinking red
+  frame + «НАВЕДЕНИЕ АКТИВНО» banner over the video while armed; a
+  remaining-time progress bar on the 4 s ARM confirmation button.
+  Overlay colors are deliberately unique — verified pixel-wise by the
+  new tools/ui_visual_test.py (9/9 live against the board); functional
+  regression tools/ui_test.py stays 11/11.
+
 ## [0.2.0] - 2026-09-11
 
 ### Added
