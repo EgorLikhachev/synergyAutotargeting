@@ -6,6 +6,16 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- Control-channel token (ADR-020) ENABLED in production: the board now
+  requires `SYNERGY_TOKEN=bench-synergy` (set by dist/operator-ui/
+  run.bat); unauthorized commands are rejected and do not refresh the
+  dead-man timer. Verified end-to-end: without the token an arm command
+  is silently dropped (0 accepted, statuses still flow); with it —
+  arm → FC rx_ok=true → stop, journal-confirmed. Both UI test suites
+  run in the closed configuration (12/12 functional, 10/10 visual,
+  fail-safe 0.3 s).
+
 ### Added
 - Operator UX, part 2 (P2, sound deliberately excluded — demasking):
   digital zoom ×1..×4 over the mouse wheel (UV-crop around the frame

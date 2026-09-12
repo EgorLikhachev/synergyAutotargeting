@@ -149,7 +149,9 @@ def main():
     marker0 = board_utc()
 
     # --- 1. Запуск пульта, подключение борта --------------------------------
-    subprocess.Popen([UI_EXE], cwd=os.path.dirname(UI_EXE))
+    subprocess.Popen(
+        [UI_EXE], cwd=os.path.dirname(UI_EXE),
+        env=dict(os.environ, SYNERGY_TOKEN=os.environ.get("SYNERGY_TOKEN", "bench-synergy")))
     hwnd = find_window(20)
     check("пульт запущен, окно найдено", bool(hwnd))
     if not hwnd:
@@ -251,7 +253,9 @@ def main():
 
     # --- 6. Реконнект после перезапуска ---------------------------------------
     marker = board_utc()
-    subprocess.Popen([UI_EXE], cwd=os.path.dirname(UI_EXE))
+    subprocess.Popen(
+        [UI_EXE], cwd=os.path.dirname(UI_EXE),
+        env=dict(os.environ, SYNERGY_TOKEN=os.environ.get("SYNERGY_TOKEN", "bench-synergy")))
     hwnd2 = find_window(20)
     line = wait_journal(marker, "[MJPEG-PUSH] подключён", timeout_s=25)
     check("перезапуск пульта → авто-реконнект борта", bool(hwnd2 and line),

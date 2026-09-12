@@ -147,7 +147,9 @@ def main():
         return 1
 
     marker0 = ssh("date -u '+%Y-%m-%d %H:%M:%S'").strip()
-    subprocess.Popen([UI_EXE], cwd=os.path.dirname(UI_EXE))
+    subprocess.Popen(
+        [UI_EXE], cwd=os.path.dirname(UI_EXE),
+        env=dict(os.environ, SYNERGY_TOKEN=os.environ.get("SYNERGY_TOKEN", "bench-synergy")))
     hwnd = find_window(20)
     check("окно пульта найдено", bool(hwnd))
     if not hwnd:
