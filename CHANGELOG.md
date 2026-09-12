@@ -235,7 +235,7 @@ validated end-to-end on a Radxa ROCK 5A.
 - `streaming`: MJPEG-over-HTTP server with HTML wrapper + push mode where the
   board connects out to the viewer; M-JPEG and hardware H.264 (mpph264enc)
   recording [ADR-009, ADR-015].
-- `commander`: aiming loop ported from the bkb project — MSP v1 SET_RAW_RC
+- `commander`: aiming loop ported from the прототип project — MSP v1 SET_RAW_RC
   codec (byte-exact), PID with deadband/slew/anti-windup, axis swap for
   rotated cameras, lead predictor with platform-velocity feedforward;
   validated on a platform simulator to ±30 px [ADR-012].
@@ -261,12 +261,9 @@ validated end-to-end on a Radxa ROCK 5A.
 
 ### Known limitations
 
-- Single-class detector model (bkb); a COCO fallback path exists but is
+- Single-class reference detector model; a COCO fallback path exists but is
   disabled pending a 9-branch export (int8 single-tensor quantization
   collapses class scores) [ADR-014].
 - On the vendor kernel, inbound TCP to user-space listeners fails while the
   NPU is active — use push-mode streaming or an SSH tunnel [ADR-009].
 
-[Unreleased]: https://github.com/EgorLikhachev/synergyAutotargeting/compare/v0.2.0...HEAD
-[0.2.0]: https://github.com/EgorLikhachev/synergyAutotargeting/compare/v0.1.0...v0.2.0
-[0.1.0]: https://github.com/EgorLikhachev/synergyAutotargeting/releases/tag/v0.1.0

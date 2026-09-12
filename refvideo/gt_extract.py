@@ -17,7 +17,7 @@ import sys
 
 import numpy as np
 
-SRC = r"C:\Users\Egorl\Downloads\Telegram Desktop\Видео с земли"
+SRC = r"dataset/raw"  # каталог роликов для разметки
 R = 120  # окно поиска от центра
 
 

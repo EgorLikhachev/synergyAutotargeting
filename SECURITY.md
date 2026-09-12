@@ -14,7 +14,8 @@ Instead, use one of these channels:
 
 1. GitHub **private vulnerability reporting**: Security tab →
    "Report a vulnerability".
-2. Email: приватный Security Advisory на GitHub (вкладка Security репозитория) (replace with the maintainer's address).
+2. Приватный Security Advisory на GitHub (вкладка Security репозитория).
+3. Канал связи с командой разработки (согласуется с заказчиком).
 
 Include what you can of: affected component (crate or tool), reproduction
 steps, impact assessment, and any suggested mitigation. You will get an

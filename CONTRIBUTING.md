@@ -10,7 +10,7 @@ contains no Python or C++ (see ADR-001 in
 Follow the [Installation](README.md#installation) steps in the README. In short:
 
 ```bash
-git clone https://github.com/EgorLikhachev/synergyAutotargeting.git
+git clone <URL-репозитория проекта>
 cd synergyAutotargeting
 cargo test --workspace        # must pass before every commit
 ```

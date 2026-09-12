@@ -1,12 +1,12 @@
-# Карта синергии: что и откуда взято в synergyAutotargeting
+# Карта синергии: что и откуда взято в synergy
 
 Дата: 2026-09-01 (ночная сессия).
 
-## Из bkb (sk/bkb, Python, полевой комплекс БПЛА)
+## Из Python-прототипа (полевой комплекс БПЛА)
 
-| Артефакт bkb | Куда попал | Трансформация |
+| Артефакт прототипа | Куда попал | Трансформация |
 |---|---|---|
-| `test_nano_cpu/nanoTracking.py` (NanoTracking) | `crates/nano-track/src/lib.rs` | Порт алгоритма OpenCV TrackerNano на Rust/tract; сам класс bkb — обёртка над cv2, портированы его гейты: счётчик потери, `_check_size`, `_edges_frame` (в pipeline) |
+| `test_nano_cpu/nanoTracking.py` (NanoTracking) | `crates/nano-track/src/lib.rs` | Порт алгоритма OpenCV TrackerNano на Rust/tract; сам класс трекера — обёртка над cv2, портированы его гейты: счётчик потери, `_check_size`, `_edges_frame` (в pipeline) |
 | `test_nano_cpu/ntModel/*.onnx` | `models/` | Как есть; backbone пересохранён в двух статических вариантах 127/255 (иначе tract конфликтует формами — ADR-003) |
 | `test_nano_cpu/filter.py` (Stabilizer) | `crates/nano-track/src/stabilizer.rs` | Дословный порт |
 | `utils/yolov8_utils.py` | `crates/detector/src/lib.rs` (decode_branches) | Порт DFL/box_process/post_process: NCHW→strides, 6-выходной layout, пороги |
@@ -15,9 +15,9 @@
 | Паттерн `exchange_tracker()` (handoff) | `crates/pipeline` | Идея «детекция переинициализирует трекер» |
 | Бенчмарк KCF/Affine/Nano (info.txt) | docs/sdd/decisions.md ADR-004 | Обоснование выбора NanoTrack |
 
-## Из Autotargeting (verus/Autotargeting, Rust+C++)
+## Из Rust-прототипа (Rust+C++, внутренний)
 
-| Артефакт Autotargeting | Куда попал | Трансформация |
+| Артефакт прототипа | Куда попал | Трансформация |
 |---|---|---|
 | `docs/SDD-SPEC.md`, `sdd/decisions.md`, `sdd/progress.json` | `docs/` | Формат и подход spec-driven; содержимое новое |
 | `crates/video-capture/src/v4l2_direct.rs` | `crates/capture/src/v4l2_direct.rs` | Дословно (проверено на 3 камерах включая Arducam) |
@@ -30,11 +30,11 @@
 
 ## Что осознанно НЕ взято
 
-- PID/MSP/UART-наведение bkb ~~(нет актуаторов на стенде)~~ — впоследствии
+- PID/MSP/UART-наведение ~~(нет актуаторов на стенде)~~ — впоследствии
   ВСЁ-ТАКИ взято: крейт commander, ADR-012; схема подключения полётника —
   docs/wiring_gep_f405.md (обновлено 2026-09-04)
-- Zenoh-шина Autotargeting (для одиночного процесса избыточна; задокументирован
+- Zenoh-шина прототип (для одиночного процесса избыточна; задокументирован
   путь расширения в SDD-SPEC §7)
-- CUDA-трекеры bkb (нет NVIDIA на борту)
+- CUDA-трекеры прототип (нет NVIDIA на борту)
 - Классы ThermalTracker (бибка — тепловизионная система; у нас USB-камера видимого
   диапазона, детекция полностью на NPU)

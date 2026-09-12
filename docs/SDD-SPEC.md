@@ -1,7 +1,7 @@
-# SDD-SPEC — synergyAutotargeting
+# SDD-SPEC — synergy
 
 **Единственный источник истины по архитектуре.** Формат унаследован от
-Autotargeting (docs/SDD-SPEC.md); журналы решений — в [sdd/decisions.md](sdd/decisions.md).
+прототип (docs/SDD-SPEC.md); журналы решений — в [sdd/decisions.md](sdd/decisions.md).
 
 ## 1. Назначение
 
@@ -90,7 +90,7 @@ score, track_ms, det_ms, fps. Итог прогона — в stdout (средн�
 ## 7. Нефункциональные решения
 
 - Процессы: один бинарник, детектор в отдельном std-потоке (каналы ёмкости 1 —
-  never-blocking для основного цикла). Шина Zenoh из Autotargeting не нужна
+  never-blocking для основного цикла). Шина Zenoh из прототипа не нужна
   для одного процесса; при разбиении на компоненты — вернуться к D-014.
 - Логирование: tracing, уровень через RUST_LOG.
 - Надёжность процесса (ADR-019): systemd Type=notify + WatchdogSec=5,

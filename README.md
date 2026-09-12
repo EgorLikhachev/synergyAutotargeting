@@ -1,11 +1,10 @@
-# synergyAutotargeting
+# synergy
 
 A hybrid target-tracking system for the Radxa ROCK 5A (RK3588S): YOLOv8 object
 **detection on the NPU every N frames** + NanoTrack **tracking on every frame**,
 with live OSD streaming, telemetry, and an aiming-command output (MSP over
 USB VCP — proven on the bench — or UART). The runtime is **100% Rust** — no Python or C++ in the pipeline.
 
-![CI](https://github.com/EgorLikhachev/synergyAutotargeting/actions/workflows/ci.yml/badge.svg)
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Version](https://img.shields.io/badge/version-0.2.0-orange.svg)
 ![Rust](https://img.shields.io/badge/rust-1.75%2B-blue?logo=rust)
@@ -45,8 +44,8 @@ the synthetic source (`--synthetic`).
 
 ```bash
 # 1. Clone
-git clone https://github.com/EgorLikhachev/synergyAutotargeting.git
-cd synergyAutotargeting
+git clone <URL-репозитория проекта>
+cd synergy
 
 # 2. Build and test on your machine (no hardware needed)
 cargo test --workspace
@@ -190,8 +189,9 @@ Released under the [MIT License](LICENSE).
 
 ## Acknowledgements
 
-- **bkb** project — NanoTrack models, YOLOv8 RKNN model, MSP/UART aiming protocol
-- **Autotargeting** project — V4L2 capture crate, SDD/ADR documentation practice
+- **the Python field prototype** — NanoTrack models, the YOLOv8 RKNN model,
+  the MSP/UART aiming protocol
+- **the Rust prototype** — V4L2 capture crate, SDD/ADR documentation practice
 - [OpenCV](https://github.com/opencv/opencv) `TrackerNano` implementation this
   tracker is ported from
 - [tract](https://github.com/sonos/tract) (pure-Rust ONNX runtime) and
