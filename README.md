@@ -131,7 +131,8 @@ cargo run --release -p operator-ui                 # listens :9000/:9010
 # on the board: synergy --duration 0 --ui <this-pc-ip>:9010
 # double-click on video = capture target; "× СНЯТЬ ЗАХВАТ" (or unlock) drops it
 # until the next lock (IDLE mode); ARM/STOP control the aiming loop;
-# ● ЗАПИСЬ (R) records the stream to records/*.mjpg (replay-compatible)
+# ● ЗАПИСЬ (R) records the stream to records/*.avi (M-JPEG in an AVI
+#   container: plays in full in any player, stays replay-compatible)
 ```
 
 CLI flags: `--config PATH`, `--synthetic`, `--duration SEC`, `--demo-detect`,
@@ -163,7 +164,8 @@ crates/
   commander/   aiming: PID + slew/deadband + lead predictor, MSP v1 codec
   app/         CLI binary `synergy`: config, OSD, telemetry, recorder
   operator-ui/ desktop app (egui): video, click-to-lock, ARM/STOP,
-               unlock (IDLE), .mjpg recording, hotkeys Esc/F/R
+               unlock (IDLE), .avi recording, fonts embedded in the exe
+               (Cyrillic + all symbols, no tofu), hotkeys Esc/F/R/X
 models/        ONNX (CPU) and RKNN (NPU int8) model files
 tools/         viewer.py, telemetry_report.py, bench.sh, deploy.sh,
                model conversion scripts, systemd unit,

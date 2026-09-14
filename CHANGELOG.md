@@ -39,6 +39,74 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
   new tools/ui_visual_test.py (9/9 live against the board); functional
   regression tools/ui_test.py stays 11/11.
 
+### Fixed
+- Operator UI: nothing jumps during recording anymore. The blinking REC
+  dot now blinks by COLOR (a transparent dot keeps its slot) instead of
+  being replaced with spaces — the badge box used to resize twice a
+  second; the REC timer, the MB counter on the stop-recording button and
+  the mode/loss timers are set in a monospace font with fixed-width
+  formats ({:>5.1}, МБ→ГБ past 999.9), so digit changes never reflow;
+  the badge and the record button widths are RESERVED from their
+  maximum possible labels (measured via layout at startup: «● REC 888:88»,
+  «■ СТОП · 999:59 · 999.9 МБ») — the button keeps one width across
+  start/stop toggles (neighbors don't shift) and the «НЕТ СИГНАЛА» state
+  became an amber fill + tooltip instead of a width-changing suffix.
+  Verified pixel-wise: badge and button bounding boxes are identical
+  across 7 screenshots spanning blink phases and digit rollovers.
+- Operator UI recording: files are now written as AVI (M-JPEG) instead of
+  a raw JPEG concatenation. The data was never the problem — every prior
+  recording already contained all frames — but players (VLC, Photos)
+  decode a raw .mjpg as a SINGLE still image, which read as "only the
+  first frame was recorded" in manual checks. The AVI container plays
+  the full clip in any player (verified: OpenCV decodes every frame
+  183/183; Windows Shell reads the full 6 s duration) and stays
+  replay-compatible — the board's `--replay` and the test suites scan
+  SOI/EOI markers and skip the container headers. Files are now
+  `records/synergy_*.avi`. The writer is also resilient to a hard kill
+  (kill -9 / TerminateProcess during an active recording): header sizes
+  are patched in place every 2 s and AVIF_HASINDEX is only set at
+  finalization, so an unfinalized file remains a valid index-less AVI
+  playable to the last patch (verified: 180/180 frames decoded after a
+  kill mid-recording). All AVI patches go through a single file handle —
+  a cloned handle shares the file position on Windows (and a dup'd fd on
+  Unix), which made the writer overwrite the file head after every patch.
+- Operator UI "стенд" section (FC details): RC-echo bars widened to fit
+  their labels with a monospace font (at 44 px the "ARM 1500" text
+  spilled onto the neighboring bars), and vertical spacing added between
+  the status line, the bars and the arm-blocker line.
+- Operator UI: the on-video REC timer was frozen at "REC 00:00" (a
+  regression from the P1 overlays pass — `rec_since` was overwritten
+  every frame). Recording itself kept working (files landed in
+  records/), but the stuck badge read as "recording does not work";
+  the start instant is now latched on the idle→recording transition
+  and the badge/blink count up. While at it, the recording failure
+  modes around it became visible: a failed bind of :9000/:9010 (e.g. a
+  second пульт instance holds the port) now shows in the video area
+  instead of dying silently in the console; «НЕТ СИГНАЛА» on the
+  stop-recording button is now frame-freshness-based (a silently-dead
+  TCP link no longer counts as signal, preventing empty recordings
+  from looking healthy); the disabled REC button explains itself on
+  hover. Functional suite 12/12 incl. "R: file grows, ≥30 frames".
+- Operator overlays no longer cover the board OSD: the mode and REC
+  badges moved to the bottom-left of the video (REC above the mode
+  badge), the zoom badge to the bottom-right. The board bakes
+  FPS-xx/S-xx/D-xx into the top-left and a timestamp into the
+  top-right of every frame — those corners stay clear now (previously
+  the REC badge sat right on the FPS counter).
+
+### Changed
+- Operator UI design system: PT Sans (with a real bold family for the
+  action buttons — egui's `strong()` only recolors) + DejaVu Sans
+  fallback, so every symbol (● → ✓ ✗ ⚠ ■ ○) renders instead of tofu
+  squares; Cyrillic comes from PT Sans itself. A single palette +
+  typography scale (12/14/20) + uniform button heights (32 px top bar,
+  48 px actions); instrument counters are monospace (digits don't
+  jitter); FC and armed-state are bordered chips; transient messages
+  (arm hint / saved path / errors) moved into a reserved fixed-height
+  row so the bottom panel no longer jumps; the recording-stop button
+  is compact (frame/dropped counters in a tooltip). Overlay RGB colors
+  and the "synergy" window title are untouched — visual suite 10/10.
+
 ## [0.2.0] - 2026-09-11
 
 ### Added

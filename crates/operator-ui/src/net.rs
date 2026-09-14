@@ -1,7 +1,7 @@
 //! Сеть операторского приложения: приём видео-пуша (:9000) и
 //! контрольного канала (:9010), команда — JSON-строки (ADR-016).
 
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::net::TcpListener;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -110,13 +110,20 @@ pub struct RecStats {
     pub started: Option<Instant>,
 }
 
-/// Запись стрима в .mjpg: приёмный поток отдаёт сырые JPEG в канал,
-/// поток-писатель дописывает их в файл. Конкатенация JPEG — это ровно
-/// replay-формат борта (--replay) и обычный M-JPEG для VLC: без
-/// перекодирования, копия байтов стрима.
+/// Запись стрима в AVI (M-JPEG): приёмный поток отдаёт сырые JPEG в канал,
+/// поток-писатель складывает их в AVI-контейнер с fourcc MJPG.
 ///
-/// Долговечность: писатель флашит буфер раз в секунду; stop() ждёт
-/// завершения писателя (джойн), так что закрытие окна не теряет хвост.
+/// Почему контейнер, а не конкатенация JPEG: сырая склейка открывается
+/// плеерами как ОДИН кадр (VLC/«Фотографии» декодируют первый JPEG и
+/// останавливаются) — на борде это выглядело как «записался только первый
+/// кадр», хотя данные в файле были все. AVI/MJPG играется целиком в VLC,
+/// «Кино и ТВ»/MPC и при этом остаётся replay-совместимым: replay борта
+/// и тесты сканируют SOI/EOI-маркеры, межкадровые заголовки контейнера
+/// они просто пропускают.
+///
+/// Долговечность: писатель флашит буфер раз в секунду; stop() дописывает
+/// индекс кадров и патчит размеры в заголовке (джойн) — закрытие окна не
+/// теряет хвост.
 pub struct Recorder {
     tx: Mutex<Option<std::sync::mpsc::SyncSender<Vec<u8>>>>,
     path: Mutex<Option<PathBuf>>,
@@ -142,13 +149,13 @@ impl Recorder {
         self.stats.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
-    /// Начать запись в файл `dir/synergy_ГГГГММДД_ЧЧММСС.mjpg`.
+    /// Начать запись в файл `dir/synergy_ГГГГММДД_ЧЧММСС.avi`.
     pub fn start(&self, dir: &std::path::Path) -> Result<PathBuf, String> {
         if self.is_recording() {
             return Err("запись уже идёт".into());
         }
         std::fs::create_dir_all(dir).map_err(|e| format!("каталог записи: {e}"))?;
-        let path = dir.join(format!("synergy_{}.mjpg", timestamp_local()));
+        let path = dir.join(format!("synergy_{}.avi", timestamp_local()));
         let file = std::fs::File::create(&path).map_err(|e| format!("файл записи: {e}"))?;
         let (tx, rx) = std::sync::mpsc::sync_channel::<Vec<u8>>(240);
         let stats = self.stats.clone();
@@ -156,31 +163,7 @@ impl Recorder {
             RecStats { started: Some(Instant::now()), ..Default::default() };
         let handle = std::thread::Builder::new()
             .name("rec-writer".into())
-            .spawn(move || {
-                let mut w = std::io::BufWriter::with_capacity(4 * 1024 * 1024, file);
-                loop {
-                    match rx.recv_timeout(Duration::from_secs(1)) {
-                        Ok(frame) => {
-                            if let Err(e) = w.write_all(&frame) {
-                                let mut s = stats.lock().unwrap_or_else(|e| e.into_inner());
-                                s.error = Some(format!("запись на диск: {e}"));
-                                break;
-                            }
-                            let mut s = stats.lock().unwrap_or_else(|e| e.into_inner());
-                            s.frames += 1;
-                            s.bytes += frame.len() as u64;
-                        }
-                        // таймаут: канал пуст ≥1 с — флашим, чтобы хвост
-                        // не копился в буфере (durability при закрытии окна)
-                        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                            let _ = w.flush();
-                        }
-                        // stop() разорвал канал — флаш и закрытие при drop
-                        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
-                    }
-                }
-                let _ = w.flush();
-            })
+            .spawn(move || avi_writer_loop(file, rx, stats))
             .map_err(|e| format!("поток записи: {e}"))?;
         *self.path.lock().unwrap_or_else(|e| e.into_inner()) = Some(path.clone());
         *self.writer.lock().unwrap_or_else(|e| e.into_inner()) = Some(handle);
@@ -219,6 +202,286 @@ impl Recorder {
             }
         }
     }
+}
+
+/// Частота кадров в заголовке AVI: борт пушит 60/N fps (по умолчанию
+/// frame_div=2 → 30); тайминги воспроизведения, не данные.
+const AVI_FPS: u32 = 30;
+
+/// Оффсеты полей заголовка, которые патчатся при финализации
+/// (размеры известны только после последнего кадра).
+struct AviPatches {
+    riff_size: usize,
+    /// avih.dwFlags: 0 во время записи, AVIF_HASINDEX при финализации.
+    avih_flags: usize,
+    avih_frames: usize,
+    strh_length: usize,
+    movi_size: usize,
+    /// Позиция fourcc 'movi' — база оффсетов idx1 и начало содержимого LIST.
+    movi_fourcc: usize,
+}
+
+fn put_u32(b: &mut Vec<u8>, v: u32) {
+    b.extend_from_slice(&v.to_le_bytes());
+}
+
+fn put_u16(b: &mut Vec<u8>, v: u16) {
+    b.extend_from_slice(&v.to_le_bytes());
+}
+
+fn put_fourcc(b: &mut Vec<u8>, s: &[u8; 4]) {
+    b.extend_from_slice(s);
+}
+
+/// Заголовок AVI (один видеопоток MJPG) с нулевыми размерами-заглушками.
+fn avi_header(w: u32, h: u32) -> (Vec<u8>, AviPatches) {
+    let mut b = Vec::with_capacity(600);
+    put_fourcc(&mut b, b"RIFF");
+    let riff_size = b.len();
+    put_u32(&mut b, 0);
+    put_fourcc(&mut b, b"AVI ");
+
+    let strl_list = 4 + (8 + 56) + (8 + 40); // 'strl' + strh + strf
+    put_fourcc(&mut b, b"LIST");
+    put_u32(&mut b, 4 + (8 + 56) + (8 + strl_list)); // 'hdrl' + avih + strl
+    put_fourcc(&mut b, b"hdrl");
+
+    put_fourcc(&mut b, b"avih");
+    put_u32(&mut b, 56);
+    put_u32(&mut b, 1_000_000 / AVI_FPS.max(1)); // usec на кадр
+    put_u32(&mut b, 4_000_000); // max байт/с (примерно)
+    put_u32(&mut b, 0); // padding granularity
+    let avih_flags = b.len();
+    // AVIF_HASINDEX ставится ТОЛЬКО при финализации (когда idx1 дописан);
+    // при жёстком убийстве процесса файла без индекса, но с честными
+    // размерами достаточно плеерам (VLC сканирует чанки 'movi')
+    put_u32(&mut b, 0);
+    let avih_frames = b.len();
+    put_u32(&mut b, 0); // всего кадров — патч при финализации
+    put_u32(&mut b, 0); // initial frames
+    put_u32(&mut b, 1); // потоков
+    put_u32(&mut b, 1 << 20); // рекомендуемый буфер
+    put_u32(&mut b, w);
+    put_u32(&mut b, h);
+    for _ in 0..4 {
+        put_u32(&mut b, 0);
+    }
+
+    put_fourcc(&mut b, b"LIST");
+    put_u32(&mut b, strl_list);
+    put_fourcc(&mut b, b"strl");
+    put_fourcc(&mut b, b"strh");
+    put_u32(&mut b, 56);
+    put_fourcc(&mut b, b"vids");
+    put_fourcc(&mut b, b"MJPG");
+    put_u32(&mut b, 0); // flags
+    put_u16(&mut b, 0); // priority
+    put_u16(&mut b, 0); // language
+    put_u32(&mut b, 0); // initial frames
+    put_u32(&mut b, 1); // scale
+    put_u32(&mut b, AVI_FPS); // rate = fps при scale=1
+    put_u32(&mut b, 0); // start
+    let strh_length = b.len();
+    put_u32(&mut b, 0); // кадров — патч
+    put_u32(&mut b, 1 << 20); // рекомендуемый буфер
+    put_u32(&mut b, 0xFFFF_FFFF); // качество
+    put_u32(&mut b, 0); // размер сэмпла (переменный)
+    put_u16(&mut b, 0); // rcFrame left
+    put_u16(&mut b, 0); // top
+    put_u16(&mut b, w as u16); // right
+    put_u16(&mut b, h as u16); // bottom
+
+    put_fourcc(&mut b, b"strf");
+    put_u32(&mut b, 40); // BITMAPINFOHEADER
+    put_u32(&mut b, 40); // biSize
+    put_u32(&mut b, w);
+    put_u32(&mut b, h);
+    put_u16(&mut b, 1); // плоскости
+    put_u16(&mut b, 24); // бит на пиксель
+    put_fourcc(&mut b, b"MJPG");
+    put_u32(&mut b, w.saturating_mul(h).saturating_mul(3));
+    for _ in 0..4 {
+        put_u32(&mut b, 0); // ppm/использованные/важные цвета
+    }
+
+    put_fourcc(&mut b, b"LIST");
+    let movi_size = b.len();
+    put_u32(&mut b, 0); // размер 'movi'-листа — патч
+    let movi_fourcc = b.len();
+    put_fourcc(&mut b, b"movi");
+    (
+        b,
+        AviPatches {
+            riff_size,
+            avih_flags,
+            avih_frames,
+            strh_length,
+            movi_size,
+            movi_fourcc,
+        },
+    )
+}
+
+/// Размеры JPEG из маркера SOF (нужны заголовку AVI до первого кадра).
+/// Нет SOF (экзотика) — 640×480, как дефолт пульта.
+fn jpeg_dims(jpeg: &[u8]) -> Option<(u32, u32)> {
+    let mut i = 2usize; // после SOI
+    while i + 9 < jpeg.len() {
+        if jpeg[i] != 0xFF {
+            return None;
+        }
+        match jpeg[i + 1] {
+            0xC0..=0xC3 => {
+                let h = u16::from_be_bytes([jpeg[i + 5], jpeg[i + 6]]) as u32;
+                let w = u16::from_be_bytes([jpeg[i + 7], jpeg[i + 8]]) as u32;
+                return Some((w, h));
+            }
+            _ => {
+                let len = u16::from_be_bytes([jpeg[i + 2], jpeg[i + 3]]) as usize;
+                i += 2 + len;
+            }
+        }
+    }
+    None
+}
+
+/// Цикл писателя: JPEG → чанки '00dc' внутри 'movi'; по завершении —
+/// индекс idx1 и патч размеров заголовка.
+///
+/// Стойкость к жёсткому убийству процесса (kill -9 / TerminateProcess):
+/// каждые 2 с размеры RIFF/movi и счётчики кадров патчатся по месту,
+/// так что не финализированный файл остаётся валидным AVI без индекса —
+/// плееры играют его до последнего патча.
+///
+/// Патчи идут через ОДИН дескриптор (BufWriter::get_mut после flush с
+/// возвратом позиции в конец): клон File (try_clone/dup) ДЕЛИТ указатель
+/// позиции с оригиналом — seek патча молча сдвигал общую позицию, и
+/// следующий write перезаписывал файл с начала.
+fn avi_writer_loop(
+    file: std::fs::File,
+    rx: std::sync::mpsc::Receiver<Vec<u8>>,
+    stats: Arc<Mutex<RecStats>>,
+) {
+    let mut w = std::io::BufWriter::with_capacity(4 * 1024 * 1024, file);
+    let mut patches: Option<AviPatches> = None;
+    // (оффсет чанка от 'movi', размер JPEG без паддинга)
+    let mut idx: Vec<(u32, u32)> = Vec::new();
+    let mut chunk_off: u32 = 4; // первый чанк сразу за fourcc 'movi'
+    let mut frames: u32 = 0;
+    let mut last_patch = Instant::now();
+    loop {
+        match rx.recv_timeout(Duration::from_secs(1)) {
+            Ok(jpeg) => {
+                if patches.is_none() {
+                    let (w_, h_) = jpeg_dims(&jpeg).unwrap_or((640, 480));
+                    let (hdr, p) = avi_header(w_, h_);
+                    if let Err(e) = w.write_all(&hdr) {
+                        let mut s = stats.lock().unwrap_or_else(|e| e.into_inner());
+                        s.error = Some(format!("запись на диск: {e}"));
+                        break;
+                    }
+                    patches = Some(p);
+                }
+                // чанк: fourcc + размер + данные (+ байт выравнивания до чётного)
+                let padded = jpeg.len() + jpeg.len() % 2;
+                let mut head = [0u8; 8];
+                head[..4].copy_from_slice(b"00dc");
+                head[4..].copy_from_slice(&(jpeg.len() as u32).to_le_bytes());
+                let err = w.write_all(&head)
+                    .and_then(|_| w.write_all(&jpeg))
+                    .and_then(|_| {
+                        if padded > jpeg.len() {
+                            w.write_all(&[0u8])
+                        } else {
+                            Ok(())
+                        }
+                    });
+                if let Err(e) = err {
+                    let mut s = stats.lock().unwrap_or_else(|e| e.into_inner());
+                    s.error = Some(format!("запись на диск: {e}"));
+                    break;
+                }
+                idx.push((chunk_off, jpeg.len() as u32));
+                chunk_off += 8 + padded as u32;
+                frames += 1;
+                let mut s = stats.lock().unwrap_or_else(|e| e.into_inner());
+                s.frames += 1;
+                s.bytes += jpeg.len() as u64;
+                // периодический патч: файл валиден и без финализации
+                if last_patch.elapsed() >= Duration::from_secs(2) {
+                    last_patch = Instant::now();
+                    let _ = w.flush();
+                    if let Some(p) = patches.as_ref() {
+                        patch_open_sizes(w.get_mut(), p, frames, chunk_off);
+                    }
+                }
+            }
+            // таймаут: канал пуст ≥1 с — флашим, чтобы хвост
+            // не копился в буфере (durability при закрытии окна)
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                let _ = w.flush();
+            }
+            // stop() разорвал канал — финализируем контейнер
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+        }
+    }
+    let _ = w.flush();
+    // Кадров не было — всё равно валидный пустой AVI (нулевая длительность).
+    if patches.is_none() {
+        let (hdr, p) = avi_header(640, 480);
+        let _ = w.write_all(&hdr);
+        patches = Some(p);
+    }
+    let Ok(mut file) = w.into_inner() else {
+        let mut s = stats.lock().unwrap_or_else(|e| e.into_inner());
+        s.error.get_or_insert_with(|| "финализация записи: буфер не сброшен".into());
+        return;
+    };
+    let p = patches.expect("заголовок записан выше");
+    let idx1_pos = file.stream_position().unwrap_or(0);
+    // idx1: по 16 байт на кадр (fourcc, флаг keyframe, оффсет от 'movi', размер)
+    let mut tail = Vec::with_capacity(8 + idx.len() * 16);
+    put_fourcc(&mut tail, b"idx1");
+    put_u32(&mut tail, (idx.len() * 16) as u32);
+    for (off, size) in idx {
+        put_fourcc(&mut tail, b"00dc");
+        put_u32(&mut tail, 0x10); // AVIIF_KEYFRAME — каждый JPEG самодостаточен
+        put_u32(&mut tail, off);
+        put_u32(&mut tail, size);
+    }
+    if file.write_all(&tail).is_err() {
+        let mut s = stats.lock().unwrap_or_else(|e| e.into_inner());
+        s.error.get_or_insert_with(|| "финализация записи: индекс".into());
+    }
+    let total = file.stream_position().unwrap_or(idx1_pos + tail.len() as u64);
+    // размеры-заглушки → реальные значения
+    let mut patch = |at: usize, v: u32| {
+        let _ = file.seek(SeekFrom::Start(at as u64));
+        let _ = file.write_all(&v.to_le_bytes());
+    };
+    patch(p.riff_size, (total - 8) as u32);
+    patch(p.avih_flags, 0x10); // теперь индекс есть — AVIF_HASINDEX
+    patch(p.avih_frames, frames);
+    patch(p.strh_length, frames);
+    patch(p.movi_size, (idx1_pos - p.movi_fourcc as u64) as u32);
+    let _ = file.flush();
+}
+
+/// Патч размеров «открытого» (ещё пишущегося) AVI — файл после жёсткого
+/// убийства процесса остаётся валидным (без idx1, флаг HASINDEX не ставится).
+/// `movi_bytes` — содержимое LIST 'movi' на момент патча (== chunk_off).
+/// Позиция дескриптора возвращается в конец — писатель продолжает аппендить.
+fn patch_open_sizes(f: &mut std::fs::File, p: &AviPatches, frames: u32, movi_bytes: u32) {
+    let riff = (p.movi_fourcc as u64 + movi_bytes as u64 - 8) as u32;
+    let mut at = |off: usize, v: u32| {
+        let _ = f.seek(SeekFrom::Start(off as u64));
+        let _ = f.write_all(&v.to_le_bytes());
+    };
+    at(p.riff_size, riff);
+    at(p.avih_frames, frames);
+    at(p.strh_length, frames);
+    at(p.movi_size, movi_bytes);
+    let _ = f.seek(SeekFrom::End(0));
 }
 
 /// Локальное время ГГГГММДД_ЧЧММСС без внешних зависимостей.
@@ -279,6 +542,12 @@ pub struct NetState {
     status_at: Arc<Mutex<Option<Instant>>>,
     cmd_tx: Arc<Mutex<Option<std::sync::mpsc::Sender<UiCommand>>>>,
     video_fps: Arc<Mutex<(Instant, u32, f32)>>, // (окно, кадры, fps)
+    /// Когда из стрима достанут последний полный JPEG (свежесть сигнала:
+    /// TCP может «жить», а кадры не приходить — тогда запись пуста).
+    last_frame_at: Arc<Mutex<Option<Instant>>>,
+    /// Ошибки bind :9000/:9010 (порт занят второй копией пульта и т.п.).
+    /// Раньше уходили только в eprintln — в оконном приложении невидимо.
+    bind_errors: Arc<Mutex<Vec<String>>>,
     rec: Arc<Recorder>,
 }
 
@@ -293,14 +562,26 @@ impl NetState {
             status_at: Arc::new(Mutex::new(None)),
             cmd_tx: Arc::new(Mutex::new(None)),
             video_fps: Arc::new(Mutex::new((Instant::now(), 0, 0.0))),
+            last_frame_at: Arc::new(Mutex::new(None)),
+            bind_errors: Arc::new(Mutex::new(Vec::new())),
             rec: Arc::new(Recorder::new()),
         };
-        spawn_video_listener(s.frame.clone(), s.frame_version.clone(), s.video_connected.clone(), s.video_fps.clone(), s.rec.clone(), repaint);
+        spawn_video_listener(
+            s.frame.clone(),
+            s.frame_version.clone(),
+            s.video_connected.clone(),
+            s.video_fps.clone(),
+            s.last_frame_at.clone(),
+            s.bind_errors.clone(),
+            s.rec.clone(),
+            repaint,
+        );
         spawn_control_listener(
             s.control_connected.clone(),
             s.status.clone(),
             s.status_at.clone(),
             s.cmd_tx.clone(),
+            s.bind_errors.clone(),
         );
         s
     }
@@ -340,6 +621,19 @@ impl NetState {
         self.video_fps.lock().unwrap_or_else(|e| e.into_inner()).2
     }
 
+    /// Возраст последнего кадра стрима, с (None = кадров ещё не было).
+    pub fn frame_age_secs(&self) -> Option<f32> {
+        self.last_frame_at
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .map(|t| t.elapsed().as_secs_f32())
+    }
+
+    /// Ошибки bind портов (порт занят — например, вторая копия пульта).
+    pub fn bind_errors(&self) -> Vec<String> {
+        self.bind_errors.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
     pub fn send(&self, cmd: UiCommand) {
         if let Some(tx) = self.cmd_tx.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
             let _ = tx.send(cmd);
@@ -349,11 +643,14 @@ impl NetState {
 
 /// Видео: слушаем :9000, борд подключается и шлёт multipart M-JPEG.
 /// Разбор — по JPEG-маркерам SOI/EOI (проверенный способ из viewer.py).
+#[allow(clippy::too_many_arguments)] // разделяемые слоты состояния — их 8
 fn spawn_video_listener(
     slot: Arc<Mutex<Option<VideoFrame>>>,
     version: Arc<AtomicU64>,
     connected: Arc<AtomicBool>,
     fps_meter: Arc<Mutex<(Instant, u32, f32)>>,
+    last_frame_at: Arc<Mutex<Option<Instant>>>,
+    bind_errors: Arc<Mutex<Vec<String>>>,
     rec: Arc<Recorder>,
     repaint: Option<egui::Context>,
 ) {
@@ -362,6 +659,12 @@ fn spawn_video_listener(
             Ok(l) => l,
             Err(e) => {
                 eprintln!("[VIDEO] не удалось слушать :9000 — {e}");
+                bind_errors
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .push(format!(
+                        "порт 9000 (видео) занят — {e}; вероятно, запущена вторая копия пульта"
+                    ));
                 return;
             }
         };
@@ -371,6 +674,9 @@ fn spawn_video_listener(
                 Err(_) => continue,
             };
             connected.store(true, Ordering::Relaxed);
+            // точка отсчёта свежести: даём 2 с на первые кадры,
+            // дальше «НЕТ СИГНАЛА» честно скажет, что кадры не идут
+            *last_frame_at.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now());
             eprintln!("[VIDEO] борт подключился");
             let mut reader = BufReader::new(stream);
             let mut buf = Vec::with_capacity(64 * 1024);
@@ -403,6 +709,7 @@ fn spawn_video_listener(
                     scan_from = 0;
                     // запись ведётся из сырого JPEG до декодирования:
                     // перекодирования нет, файл = копия стрима
+                    *last_frame_at.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now());
                     rec.submit(&jpeg);
                     match decode_rgba(&jpeg) {
                         Some((rgba, w, h)) => {
@@ -444,12 +751,19 @@ fn spawn_control_listener(
     status_slot: Arc<Mutex<Option<Status>>>,
     status_at: Arc<Mutex<Option<Instant>>>,
     cmd_slot: Arc<Mutex<Option<std::sync::mpsc::Sender<UiCommand>>>>,
+    bind_errors: Arc<Mutex<Vec<String>>>,
 ) {
     let _ = std::thread::Builder::new().name("control".into()).spawn(move || {
         let listener = match TcpListener::bind("0.0.0.0:9010") {
             Ok(l) => l,
             Err(e) => {
                 eprintln!("[CONTROL] не удалось слушать :9010 — {e}");
+                bind_errors
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .push(format!(
+                        "порт 9010 (управление) занят — {e}; вероятно, запущена вторая копия пульта"
+                    ));
                 return;
             }
         };
@@ -613,7 +927,7 @@ mod tests {
     }
 
     #[test]
-    fn recorder_writes_concat_of_jpegs() {
+    fn recorder_writes_avi_container() {
         let dir = std::env::temp_dir().join("synergy_rec_test");
         let rec = Recorder::new();
         let path = rec.start(&dir).expect("start");
@@ -621,20 +935,25 @@ mod tests {
         let b = b"\xff\xd8\xff\xe0BBBB\xff\xd9".to_vec();
         rec.submit(&a);
         rec.submit(&b);
+        // stop() джойнит писателя — контейнер финализирован (индекс, размеры)
         let stopped = rec.stop();
         assert_eq!(stopped.as_deref(), Some(path.as_path()));
         assert!(!rec.is_recording());
-        // поток-писатель завершается асинхронно — даём ему момент
-        for _ in 0..50 {
-            if std::fs::metadata(&path).map(|m| m.len() >= (a.len() + b.len()) as u64).unwrap_or(false) {
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(20));
-        }
         let data = std::fs::read(&path).expect("файл записи");
-        assert_eq!(data.len(), a.len() + b.len());
-        assert_eq!(&data[..a.len()], &a[..]);
-        assert_eq!(&data[a.len()..], &b[..]);
+        // валидный контейнер: RIFF/AVI, MJPG, индекс кадров, честный размер
+        assert_eq!(&data[0..4], b"RIFF", "нет RIFF-магики");
+        assert_eq!(&data[8..12], b"AVI ", "нет AVI-типа");
+        assert!(data.windows(4).any(|w| w == b"MJPG"), "нет fourcc MJPG");
+        let riff = u32::from_le_bytes([data[4], data[5], data[6], data[7]]) as usize;
+        assert_eq!(riff + 8, data.len(), "размер RIFF != размеру файла");
+        let idx_at = data.windows(4).position(|w| w == b"idx1").expect("нет idx1");
+        let idx_size =
+            u32::from_le_bytes(data[idx_at + 4..idx_at + 8].try_into().unwrap());
+        assert_eq!(idx_size / 16, 2, "в индексе должно быть 2 кадра");
+        // replay-совместимость (скан SOI/EOI как у борта): оба JPEG достаются
+        assert_eq!(data.windows(3).filter(|w| *w == b"\xff\xd8\xff").count(), 2);
+        assert!(data.windows(a.len()).any(|w| w == a.as_slice()));
+        assert!(data.windows(b.len()).any(|w| w == b.as_slice()));
         let _ = std::fs::remove_file(&path);
     }
 

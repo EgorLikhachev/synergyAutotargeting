@@ -6,11 +6,17 @@
 //! на :9010 (default, меняется флагом --control-port).
 
 mod net;
+mod style;
 
 use eframe::egui;
 use egui::{Color32, ColorImage, Pos2, Rect, Sense, Stroke, TextureHandle, Vec2};
 
 use net::{NetState, UiCommand};
+use style::{
+    action_btn, bold, chip, counter, top_btn, ACQUIRE_BLUE, ARM_PLAQUE, ARM_RED, ARM_RED_DIM,
+    BG_WELL, CONFIRM, CYAN, DANGER, DANGER_ACTIVE, FAIL, LOST_RED, OK, REC_RED, TEXT, TEXT_DIM,
+    TOL_AMBER, TOL_GREEN, TRACK_GREEN, W_ARM, W_STOP, W_UNLOCK, WARN,
+};
 
 const FRAME_W: usize = 640;
 const FRAME_H: usize = 480;
@@ -62,10 +68,19 @@ struct OperatorApp {
     zoom: f32,
     /// Последний установленный заголовок окна (не слать команду зря).
     last_title: String,
+    /// Зарезервированная ширина кнопки ЗАПИСЬ/СТОП (по максимальной
+    /// метке — счётчики не меняют ширину кнопки, соседи не прыгают).
+    rec_btn_w: f32,
+    /// Зарезервированная ширина текста REC-бейджа на видео («● REC 888:88»).
+    rec_badge_w: f32,
 }
 
 impl OperatorApp {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        // Дизайн-система: PT Sans + DejaVu (значки), палитра, скругления.
+        style::install(&cc.egui_ctx);
+        // Резерв ширин (по максимальным меткам) меряется лениво на первом
+        // кадре: до Context::run() шрифты недоступны (паника egui).
         let texture = cc.egui_ctx.load_texture(
             "video",
             ColorImage::new([FRAME_W, FRAME_H], Color32::BLACK),
@@ -92,7 +107,32 @@ impl OperatorApp {
             rec_since: None,
             zoom: 1.0,
             last_title: String::new(),
+            rec_btn_w: 0.0,
+            rec_badge_w: 0.0,
         }
+    }
+
+    /// Ленивый резерв ширин (первый кадр): шрифты меряются через ctx,
+    /// в конструкторе это паникует («No fonts available until Context::run»).
+    fn reserve_widths(&mut self, ctx: &egui::Context) {
+        if self.rec_btn_w > 0.0 {
+            return;
+        }
+        // Кнопка ЗАПИСЬ/СТОП: максимальная метка + внутренние отступы +
+        // запас. Кнопка не меняет ширину с ростом счётчиков и при
+        // переключении старт/стоп — соседи не прыгают.
+        self.rec_btn_w =
+            ctx.fonts(|f| f.layout_job(rec_stop_label_max()).rect.width()) + 24.0;
+        // REC-бейдж на видео: «● REC 888:88» — бокс неподвижен от старта
+        // записи до конца (мигает только цвет точки, цифры моноширинные).
+        self.rec_badge_w = ctx.fonts(|f| {
+            f.layout_job(job(&[
+                ("● ".into(), egui::FontId::proportional(18.0), REC_RED),
+                ("REC 888:88".into(), egui::FontId::monospace(16.0), REC_RED),
+            ]))
+            .rect
+            .width()
+        });
     }
 
     /// Каталог записей: рядом с exe (dist-папка/ярлык держат WorkingDirectory).
@@ -191,6 +231,7 @@ impl OperatorApp {
 
 impl eframe::App for OperatorApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.reserve_widths(ctx);
         // FPS UI
         let now = std::time::Instant::now();
         let _dt = now.duration_since(self.last_frame_time).as_secs_f32();
@@ -224,6 +265,10 @@ impl eframe::App for OperatorApp {
         let status_age = self.net.status_age_secs();
         let video_ok = self.net.video_connected();
         let ctl_ok = self.net.control_connected();
+        // Свежесть сигнала: TCP «жив», а кадры не идут (тихая смерть линка)
+        // — запись в этом состоянии пишется пустой. Порог 2 с.
+        let signal_stale = video_ok
+            && self.net.frame_age_secs().is_some_and(|a| a > 2.0);
 
         // Таймеры оверлеев: смена режима и старт/стоп записи.
         if let Some(s) = status.as_ref() {
@@ -234,8 +279,15 @@ impl eframe::App for OperatorApp {
             }
         }
         let recording = self.net.recorder().is_recording();
-        self.rec_since = recording.then_some(std::time::Instant::now())
-            .filter(|_| recording);
+        // Фиксируем момент СТАРТА записи (переход не-идёт → идёт), иначе
+        // таймер «REC mm:ss» на видео стоял на 00:00 вечно.
+        if recording {
+            if self.rec_since.is_none() {
+                self.rec_since = Some(std::time::Instant::now());
+            }
+        } else {
+            self.rec_since = None;
+        }
 
         // Горячие клавиши оператора: Esc — СТОП наведения, F — полный
         // экран, R — запись. Работают в любом месте окна (полей ввода нет).
@@ -293,82 +345,82 @@ impl eframe::App for OperatorApp {
             }
         }
 
-        // Верхняя панель: связь + счётчики
+        // Верхняя панель: связь + счётчики + управление записью
         egui::TopBottomPanel::top("top").show(ctx, |ui| {
+            ui.add_space(4.0);
             ui.horizontal(|ui| {
                 dot(ui, video_ok, "видео");
                 dot(ui, ctl_ok, "управление");
                 ui.separator();
                 ui.label(format!(
-                    "видео {} FPS · UI {:.0} FPS",
+                    "видео {:.0} FPS · UI {:.0} FPS",
                     self.net.video_fps(),
                     self.ui_fps
                 ));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button("Во весь экран (F)").clicked() {
+                    if ui.add(top_btn("Во весь экран (F)")).clicked() {
                         Self::toggle_fullscreen(ctx);
                     }
-                    if ui.button("Папка записей").clicked() {
+                    if ui.add(top_btn("Папка записей")).clicked() {
                         open_in_explorer(&Self::records_dir());
                     }
                     ui.separator();
-                    // ЗАПИСЬ стрима в .mjpg (replay-формат борта, открывается VLC)
+                    // ЗАПИСЬ стрима в AVI/M-JPEG (открывается любым плеером)
                     let rec = self.net.recorder();
                     if rec.is_recording() {
                         let st = rec.stats();
                         let secs = st.started.map(|t| t.elapsed().as_secs()).unwrap_or(0);
-                        let (mm, ss) = (secs / 60, secs % 60);
-                        let mut label = format!(
-                            "■ СТОП · {:02}:{:02} · {} кадров · {:.1} МБ",
-                            mm, ss, st.frames, st.bytes as f32 / 1e6
+                        let stale = !video_ok || signal_stale;
+                        // Ширина зарезервирована по максимуму (rec_btn_w):
+                        // таймер/мегабайты не растягивают кнопку. Потеря
+                        // сигнала — янтарная заливка вместо суффикса (суффикс
+                        // менял бы ширину), причина — в подсказке.
+                        let mut hover = format!(
+                            "{} кадров · сброшено {} (диск не успевал)",
+                            st.frames, st.dropped
                         );
-                        if st.dropped > 0 {
-                            label.push_str(&format!(" · сброшено {}", st.dropped));
+                        if stale {
+                            hover.push_str(" · НЕТ СИГНАЛА: кадры не приходят");
                         }
-                        if !video_ok {
-                            label.push_str(" · НЕТ СИГНАЛА");
-                        }
-                        let btn = egui::Button::new(
-                            egui::RichText::new(label).size(14.0).strong(),
-                        )
-                        .fill(Color32::from_rgb(170, 30, 30))
-                        .min_size(egui::vec2(210.0, 30.0));
-                        if ui.add(btn).clicked() {
+                        let btn = egui::Button::new(rec_stop_label(secs, st.bytes))
+                            .fill(if stale { style::REC_STALE } else { DANGER })
+                            .min_size(egui::vec2(self.rec_btn_w, style::BTN_H_TOP));
+                        if ui.add(btn).on_hover_text(hover).clicked() {
                             self.toggle_recording();
                         }
                     } else {
-                        let btn = egui::Button::new(
-                            egui::RichText::new("● ЗАПИСЬ (R)").size(14.0).strong(),
-                        )
-                        .min_size(egui::vec2(130.0, 30.0));
+                        let btn = egui::Button::new(bold("● ЗАПИСЬ (R)").size(14.0))
+                            .min_size(egui::vec2(self.rec_btn_w, style::BTN_H_TOP));
                         let resp = ui.add_enabled(video_ok, btn);
                         if resp.clicked() {
                             self.toggle_recording();
+                        } else if !video_ok {
+                            resp.on_disabled_hover_text(
+                                "нет видео от борта — запись невозможна; \
+                                 проверьте, что борд запущен с --ui и порт 9000 свободен",
+                            );
                         }
                     }
                 });
             });
+            ui.add_space(4.0);
         });
 
-        // Нижняя панель: статус + кнопки
+        // Нижняя панель: приборы + действия
         egui::TopBottomPanel::bottom("bottom").show(ctx, |ui| {
-            ui.add_space(6.0);
+            ui.add_space(4.0);
             // Приборный ряд: режим-лампа + score-градусник + fps/e2e с
             // цветовой кодировкой по порогам + компактный FC. Зелёное =
             // норма, янтарь = внимание, красное = проблема — читается
-            // одним взглядом без разбора текста.
+            // одним взглядом без разбора текста. Счётчики — моноширинно
+            // (цифры не меняют ширину, ничего не прыгает).
             let (mode_col, mode_txt) = match status.as_ref().map(|s| s.mode.as_str()) {
-                Some("TRACK") => (Color32::from_rgb(60, 220, 90), "TRACK"),
-                Some("ACQUIRE") => (Color32::from_rgb(80, 200, 255), "ACQUIRE"),
-                Some("LOST") => (Color32::from_rgb(255, 90, 90), "LOST"),
+                Some("TRACK") => (TRACK_GREEN, "TRACK"),
+                Some("ACQUIRE") => (ACQUIRE_BLUE, "ACQUIRE"),
+                Some("LOST") => (LOST_RED, "LOST"),
                 Some("IDLE") => (Color32::GRAY, "ОЖИДАНИЕ"),
                 _ => (Color32::GRAY, "—"),
             };
-            let (green, amber, red) = (
-                Color32::from_rgb(90, 200, 90),
-                Color32::from_rgb(230, 170, 40),
-                Color32::from_rgb(220, 70, 70),
-            );
             // Почему FC не вооружится (ADR-021): считаем один раз — чип в
             // приборе, полный список в «стенд»-секции.
             let blockers = status
@@ -378,21 +430,21 @@ impl eframe::App for OperatorApp {
                 .map(|fc| commander::msp::arming_disable_names(fc.flags))
                 .unwrap_or_default();
             ui.horizontal(|ui| {
-                ui.colored_label(mode_col, egui::RichText::new(mode_txt).size(20.0).strong());
+                ui.colored_label(mode_col, bold(mode_txt).size(20.0));
                 if let Some(s) = &status {
                     let sc = s.score.clamp(0.0, 1.0);
-                    let scol = if sc >= 0.5 { green } else if sc >= 0.3 { amber } else { red };
+                    let scol = if sc >= 0.5 { OK } else if sc >= 0.3 { WARN } else { FAIL };
                     ui.add(
                         egui::ProgressBar::new(sc)
-                            .desired_width(88.0)
+                            .desired_width(96.0)
                             .text(format!("score {:.2}", s.score))
                             .fill(scol),
                     );
-                    let fcol = if s.fps >= 50.0 { green } else if s.fps >= 40.0 { amber } else { red };
-                    ui.colored_label(fcol, egui::RichText::new(format!("{:.0} fps", s.fps)).size(15.0));
-                    let ecol = if s.e2e_ms < 6.0 { green } else if s.e2e_ms < 12.0 { amber } else { red };
-                    ui.colored_label(ecol, egui::RichText::new(format!("e2e {:.1} мс", s.e2e_ms)).size(15.0));
-                    ui.weak(format!("дет {} · кадр {}", s.dets.len(), s.frame_seq));
+                    let fcol = if s.fps >= 50.0 { OK } else if s.fps >= 40.0 { WARN } else { FAIL };
+                    counter(ui, fcol, format!("{:.0} fps", s.fps));
+                    let ecol = if s.e2e_ms < 6.0 { OK } else if s.e2e_ms < 12.0 { WARN } else { FAIL };
+                    counter(ui, ecol, format!("e2e {:.1} мс", s.e2e_ms));
+                    counter(ui, TEXT_DIM, format!("дет {} · кадр {}", s.dets.len(), s.frame_seq));
                 } else if ctl_ok {
                     ui.weak("нет данных от борта");
                 } else {
@@ -401,16 +453,13 @@ impl eframe::App for OperatorApp {
                 // Компактный FC: ✓ связь + ✓ RC-поток.
                 match status.as_ref().and_then(|s| s.fc.as_ref()) {
                     Some(fc) if fc.online && fc.rx_ok => {
-                        ui.colored_label(green, egui::RichText::new("FC ✓RC").size(14.0).strong());
+                        chip(ui, egui::RichText::new("FC ✓RC").size(13.0), OK);
                     }
                     Some(fc) if fc.online => {
-                        ui.colored_label(
-                            amber,
-                            egui::RichText::new("FC ✓·RC ✗").size(14.0).strong(),
-                        );
+                        chip(ui, egui::RichText::new("FC ✓·RC ✗").size(13.0), WARN);
                     }
                     Some(_) => {
-                        ui.colored_label(red, egui::RichText::new("FC ✗").size(14.0).strong());
+                        chip(ui, egui::RichText::new("FC ✗").size(13.0), FAIL);
                     }
                     None => {}
                 }
@@ -421,10 +470,7 @@ impl eframe::App for OperatorApp {
                     } else {
                         format!("АРМ-блок: {}", blockers[0])
                     };
-                    ui.colored_label(
-                        Color32::from_rgb(220, 180, 60),
-                        egui::RichText::new(t).size(12.0),
-                    );
+                    ui.colored_label(WARN, egui::RichText::new(t).size(12.0));
                 }
                 // Возраст данных: зависший борт виден сразу
                 if let Some(age) = status_age {
@@ -432,16 +478,20 @@ impl eframe::App for OperatorApp {
                         ui.label(
                             egui::RichText::new(format!("данные {age:.0} с назад"))
                                 .size(14.0)
-                                .color(Color32::from_rgb(220, 180, 60)),
+                                .color(WARN),
                         );
                     }
                 }
             });
             // Стенд-секция: детали FC (полное состояние + эхо каналов
             // MSP_RC + полный список блокировок арма). В поле свёрнута.
+            // Внутри — «воздух»: полоски шире своего текста (при узких
+            // подписи «ARM 1500» вылезали на соседние полоски) и
+            // вертикальные отступы между строками.
             egui::CollapsingHeader::new("стенд: FC · RC-эхо · АРМ-блок")
                 .default_open(false)
                 .show(ui, |ui| {
+            ui.add_space(6.0);
             // Индикатор FC (ADR-021): видит ли полётник наш RC-поток.
             match status.as_ref().and_then(|s| s.fc.as_ref()) {
                 Some(fc) if fc.online => {
@@ -452,24 +502,29 @@ impl eframe::App for OperatorApp {
                         ui.label(
                             egui::RichText::new("FC: СВЯЗЬ ОК, RC ПРИНИМАЕТСЯ")
                                 .size(12.0)
-                                .color(Color32::from_rgb(90, 190, 90)),
+                                .color(OK),
                         );
                     } else {
                         ui.label(
                             egui::RichText::new("FC: СВЯЗЬ ОК, НО RC НЕ ВИДИТ (RXLOSS)")
                                 .size(12.0)
                                 .strong()
-                                .color(Color32::from_rgb(230, 130, 40)),
+                                .color(WARN),
                         );
                     }
+                    ui.add_space(6.0);
                     ui.horizontal(|ui| {
                         const LABELS: [&str; 8] = ["R", "P", "T", "Y", "ARM", "A2", "A3", "A4"];
                         for (i, v) in fc.ch.iter().take(6).enumerate() {
                             let frac = ((*v as f32 - 1000.0) / 1000.0).clamp(0.0, 1.0);
                             let armed_ch = i == 4 && *v > 1700;
                             let bar = egui::ProgressBar::new(frac)
-                                .desired_width(40.0)
-                                .text(format!("{} {}", LABELS[i], v))
+                                .desired_width(78.0)
+                                .text(
+                                    egui::RichText::new(format!("{} {}", LABELS[i], v))
+                                        .monospace()
+                                        .size(12.0),
+                                )
                                 .fill(if armed_ch {
                                     Color32::from_rgb(200, 60, 60)
                                 } else {
@@ -492,10 +547,11 @@ impl eframe::App for OperatorApp {
                             } else {
                                 format!("АРМ-блок FC: {}", head.join(", "))
                             };
+                            ui.add_space(6.0);
                             ui.label(
                                 egui::RichText::new(text)
-                                    .size(10.0)
-                                    .color(Color32::from_rgb(200, 160, 60)),
+                                    .size(12.0)
+                                    .color(WARN),
                             );
                         }
                     }
@@ -504,39 +560,38 @@ impl eframe::App for OperatorApp {
                     ui.label(
                         egui::RichText::new("FC: НЕ ОТВЕЧАЕТ (нет телеметрии)")
                             .size(12.0)
-                            .color(Color32::from_rgb(200, 80, 80)),
+                            .color(FAIL),
                     );
                 }
                 None => {}
             }
+            ui.add_space(4.0);
                 });
             ui.add_space(4.0);
-            // кнопки
+            // Кнопочный ряд: единая высота (48 px) и выверенные пропорции —
+            // СТОП крупнее прочих, АРМ-подтверждение шире (длинный текст).
             ui.horizontal(|ui| {
-                // Состояние наведения — крупно и однозначно.
+                // Состояние наведения — чип, крупно и однозначно.
                 let armed = status.as_ref().map(|s| s.armed).unwrap_or(false);
                 if armed {
-                    ui.label(
-                        egui::RichText::new("● НАВЕДЕНИЕ РАЗРЕШЕНО")
-                            .size(14.0)
-                            .strong()
-                            .color(Color32::from_rgb(230, 60, 60)),
+                    chip(
+                        ui,
+                        bold("● НАВЕДЕНИЕ РАЗРЕШЕНО").size(14.0),
+                        Color32::from_rgb(230, 60, 60),
                     );
                 } else {
-                    ui.label(
-                        egui::RichText::new("○ наведение запрещено")
-                            .size(14.0)
-                            .color(Color32::from_rgb(120, 160, 120)),
+                    chip(
+                        ui,
+                        egui::RichText::new("○ наведение запрещено").size(14.0),
+                        Color32::from_rgb(120, 160, 120),
                     );
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    // СТОП — большая красная (всегда доступна)
-                    let stop_btn = egui::Button::new(
-                        egui::RichText::new("СТОП (Esc)").size(20.0).strong(),
-                    )
-                    .fill(Color32::from_rgb(150, 30, 30))
-                    .min_size(egui::vec2(110.0, 40.0));
-                    if ui.add(stop_btn).clicked() {
+                    // СТОП — самая заметная кнопка пульта (всегда доступна)
+                    if ui
+                        .add(action_btn("СТОП (Esc)", 20.0, Some(DANGER), W_STOP))
+                        .clicked()
+                    {
                         self.send_stop(ctl_ok);
                     }
                     // СНЯТЬ ЗАХВАТ: сбросить цель и трекинг; авто-захват
@@ -547,30 +602,25 @@ impl eframe::App for OperatorApp {
                         status.as_ref().map(|s| s.mode.as_str()),
                         Some("TRACK") | Some("ACQUIRE") | Some("LOST")
                     );
-                    let unl = egui::Button::new(
-                        egui::RichText::new("× СНЯТЬ ЗАХВАТ").size(15.0).strong(),
-                    )
-                    .min_size(egui::vec2(150.0, 36.0));
+                    let unl = action_btn("× СНЯТЬ ЗАХВАТ", 15.0, None, W_UNLOCK);
                     if ui.add_enabled(track_engaged, unl).clicked() {
                         self.net.send(UiCommand::Unlock);
                     }
                     // АРМ — двухшаговое подтверждение (безопасность):
                     // первый клик только «заряжает» кнопку, второй включает.
                     if armed {
-                        let off = egui::Button::new(
-                            egui::RichText::new("● АРМ ВКЛ — выключить").size(18.0).strong(),
-                        )
-                        .fill(Color32::from_rgb(190, 40, 40))
-                        .min_size(egui::vec2(170.0, 40.0));
+                        let off = action_btn(
+                            "● АРМ ВКЛ — выключить",
+                            16.0,
+                            Some(DANGER_ACTIVE),
+                            W_ARM,
+                        );
                         if ui.add(off).clicked() {
                             self.net.send(UiCommand::Arm { on: false });
                         }
                     } else if self.arm_confirm {
-                        let yes = egui::Button::new(
-                            egui::RichText::new("ТОЧНО → РАЗРЕШИТЬ").size(18.0).strong(),
-                        )
-                        .fill(Color32::from_rgb(120, 90, 20))
-                        .min_size(egui::vec2(170.0, 40.0));
+                        let yes =
+                            action_btn("ТОЧНО → РАЗРЕШИТЬ", 16.0, Some(CONFIRM), W_ARM);
                         let resp = ui.add(yes);
                         if resp.clicked() {
                             self.net.send(UiCommand::Arm { on: true });
@@ -590,14 +640,11 @@ impl eframe::App for OperatorApp {
                                     egui::vec2(w, 3.0),
                                 ),
                                 0.0,
-                                Color32::from_rgb(255, 170, 0),
+                                TOL_AMBER,
                             );
                         }
                     } else {
-                        let arm = egui::Button::new(
-                            egui::RichText::new("АРМ (2 клика)").size(18.0).strong(),
-                        )
-                        .min_size(egui::vec2(170.0, 40.0));
+                        let arm = action_btn("АРМ (2 клика)", 16.0, None, W_ARM);
                         if ui.add(arm).clicked() {
                             self.arm_confirm = true;
                             self.arm_confirm_at = Some(std::time::Instant::now());
@@ -605,73 +652,74 @@ impl eframe::App for OperatorApp {
                     }
                 });
             });
-            // Подсказка подтверждения (автосброс 4 с — не даём «заряженной»
-            // кнопке висеть бесконечно).
-            if self.arm_confirm {
-                let left = 4.0 - self
-                    .arm_confirm_at
-                    .map(|t| t.elapsed().as_secs_f32())
-                    .unwrap_or(4.0);
-                if left <= 0.0 {
-                    self.arm_confirm = false;
-                    self.arm_confirm_at = None;
-                } else {
-                    ui.label(
-                        egui::RichText::new(format!(
-                            "⚠ нажмите «ТОЧНО → РАЗРЕШИТЬ» в течение {left:.1} с, \
-                             иначе подтверждение снимется"
-                        ))
-                        .size(14.5)
-                        .color(Color32::from_rgb(220, 180, 60)),
-                    );
-                }
-            }
-            // путь сохранённой записи: клик — копировать, кнопка — открыть папку
-            if let Some((path, t)) = &self.last_rec {
-                if t.elapsed().as_secs_f32() < 10.0 {
-                    ui.horizontal(|ui| {
+            // Зарезервированная строка транзиентных сообщений: высота
+            // постоянна — панель не «дёргается», когда сообщения приходят
+            // и уходят. Приоритет: ошибка записи > нет связи > подсказка
+            // подтверждения АРМ > путь сохранённой записи.
+            ui.set_min_height(style::MSG_ROW_H);
+            ui.horizontal(|ui| {
+                if let Some((e, t)) = &self.rec_error {
+                    if t.elapsed().as_secs_f32() < 5.0 {
+                        ui.label(
+                            egui::RichText::new(format!("ошибка записи: {e}"))
+                                .size(13.5)
+                                .color(FAIL),
+                        );
+                    } else {
+                        self.rec_error = None;
+                    }
+                } else if let Some(t) = &self.no_link_flash {
+                    if t.elapsed().as_secs_f32() < 3.0 {
+                        ui.label(
+                            egui::RichText::new("нет связи с бортом — команда не отправлена")
+                                .size(13.5)
+                                .color(WARN),
+                        );
+                    } else {
+                        self.no_link_flash = None;
+                    }
+                } else if self.arm_confirm {
+                    // Автосброс 4 с — не даём «заряженной» кнопке висеть
+                    // бесконечно.
+                    let left = 4.0 - self
+                        .arm_confirm_at
+                        .map(|t| t.elapsed().as_secs_f32())
+                        .unwrap_or(4.0);
+                    if left <= 0.0 {
+                        self.arm_confirm = false;
+                        self.arm_confirm_at = None;
+                    } else {
+                        ui.label(
+                            egui::RichText::new(format!(
+                                "⚠ нажмите «ТОЧНО → РАЗРЕШИТЬ» в течение {left:.1} с, \
+                                 иначе подтверждение снимется"
+                            ))
+                            .size(13.5)
+                            .color(WARN),
+                        );
+                    }
+                } else if let Some((path, t)) = &self.last_rec {
+                    if t.elapsed().as_secs_f32() < 10.0 {
+                        // клик по пути — скопировать (папка открыается
+                        // кнопкой «Папка записей» сверху)
                         if ui
-                            .button(
-                                egui::RichText::new(format!("запись сохранена: {path}"))
-                                    .size(14.5)
-                                    .color(Color32::from_rgb(120, 200, 120)),
+                            .label(
+                                egui::RichText::new(format!(
+                                    "запись сохранена: {path} (клик — копировать)"
+                                ))
+                                .size(13.5)
+                                .color(OK),
                             )
-                            .on_hover_text("клик — скопировать путь")
                             .clicked()
                         {
                             ctx.copy_text(path.clone());
                         }
-                        if ui.button("открыть папку").clicked() {
-                            open_in_explorer(&Self::records_dir());
-                        }
-                    });
-                } else {
-                    self.last_rec = None;
+                    } else {
+                        self.last_rec = None;
+                    }
                 }
-            }
-            if let Some((e, t)) = &self.rec_error {
-                if t.elapsed().as_secs_f32() < 5.0 {
-                    ui.label(
-                        egui::RichText::new(format!("ошибка записи: {e}"))
-                            .size(14.5)
-                            .color(Color32::from_rgb(230, 90, 90)),
-                    );
-                } else {
-                    self.rec_error = None;
-                }
-            }
-            if let Some(t) = &self.no_link_flash {
-                if t.elapsed().as_secs_f32() < 3.0 {
-                    ui.label(
-                        egui::RichText::new("нет связи с бортом — команда не отправлена")
-                            .size(14.5)
-                            .color(Color32::from_rgb(220, 180, 60)),
-                    );
-                } else {
-                    self.no_link_flash = None;
-                }
-            }
-            ui.add_space(6.0);
+            });
+            ui.add_space(2.0);
         });
 
         // Центр: видео
@@ -688,7 +736,7 @@ impl eframe::App for OperatorApp {
             }
             // letterbox-подгонка текстуры под фактический размер кадра
             let (scale, vrect) = self.video_geom(rect);
-            ui.painter().rect_filled(rect, 0.0, ui.visuals().panel_fill);
+            ui.painter().rect_filled(rect, 0.0, BG_WELL);
             if video_ok {
                 let half = 0.5 - 0.5 / self.zoom;
                 let uv = Rect::from_min_max(
@@ -697,12 +745,26 @@ impl eframe::App for OperatorApp {
                 );
                 ui.painter().image(self.texture.id(), vrect, uv, Color32::WHITE);
             } else {
+                // Ошибки bind (порт занят второй копией пульта) важнее
+                // «ждём борт» — без них REC молча мёртв, а причина в консоли.
+                let bind_errors = self.net.bind_errors();
+                let (text, col) = if bind_errors.is_empty() {
+                    (
+                        "ждём борт…\nзапустите: synergy --ui <этот-хост>:9010".to_string(),
+                        Color32::GRAY,
+                    )
+                } else {
+                    (
+                        format!("НЕ ЗАПУСТИЛСЯ ПРИЁМ\n{}", bind_errors.join("\n")),
+                        Color32::from_rgb(255, 170, 0),
+                    )
+                };
                 ui.painter().text(
                     rect.center(),
                     egui::Align2::CENTER_CENTER,
-                    "ждём борт…\nзапустите: synergy --ui <этот-хост>:9010",
-                    egui::FontId::proportional(22.0),
-                    Color32::GRAY,
+                    text,
+                    egui::FontId::proportional(20.0),
+                    col,
                 );
             }
 
@@ -723,9 +785,9 @@ impl eframe::App for OperatorApp {
                 }
                 if let Some(b) = s.box_xywh {
                     let col = match s.mode.as_str() {
-                        "TRACK" => Color32::from_rgb(60, 220, 90),
-                        "ACQUIRE" => Color32::from_rgb(80, 200, 255),
-                        _ => Color32::from_rgb(255, 90, 90),
+                        "TRACK" => TRACK_GREEN,
+                        "ACQUIRE" => ACQUIRE_BLUE,
+                        _ => LOST_RED,
                     };
                     if let Some(p) = self.frame_to_screen(b[0] as f32, b[1] as f32) {
                         let wh = Pos2::new(
@@ -754,11 +816,11 @@ impl eframe::App for OperatorApp {
                 }
             }
 
-            // вспышка LOCK SENT
+            // вспышка LOCK SENT (ниже плашки АРМ — обе по центру сверху)
             if let Some(t) = self.lock_flash_ms {
                 if t.elapsed().as_millis() < 600 {
                     ui.painter().text(
-                        vrect.center_top() + Vec2::new(0.0, 30.0),
+                        vrect.center_top() + Vec2::new(0.0, 56.0),
                         egui::Align2::CENTER_CENTER,
                         "ЗАХВАТ ОТПРАВЛЕН",
                         egui::FontId::proportional(20.0),
@@ -778,7 +840,7 @@ impl eframe::App for OperatorApp {
                 // 1) Прицел: крест с зазором в центре кадра + зона
                 //    допуска ±30 px (критерий удержания, фаза D).
                 let c = vrect.center();
-                let cyan = Color32::from_rgb(0, 210, 255);
+                let cyan = CYAN;
                 for seg in [
                     (Pos2::new(c.x - 18.0, c.y), Pos2::new(c.x - 7.0, c.y)),
                     (Pos2::new(c.x + 7.0, c.y), Pos2::new(c.x + 18.0, c.y)),
@@ -795,9 +857,9 @@ impl eframe::App for OperatorApp {
                     ((bx - fcx).powi(2) + (by - fcy).powi(2)).sqrt() <= 30.0
                 });
                 let tol_col = if in_tol == Some(true) {
-                    Color32::from_rgb(40, 255, 120) // цель в допуске
+                    TOL_GREEN // цель в допуске
                 } else {
-                    Color32::from_rgb(255, 170, 0) // вне допуска / цели нет
+                    TOL_AMBER // вне допуска / цели нет
                 };
                 ui.painter().circle_stroke(
                     c,
@@ -805,21 +867,31 @@ impl eframe::App for OperatorApp {
                     Stroke::new(2.0_f32, tol_col),
                 );
 
-                // 2) Бейдж режима + таймер удержания/потери (периферийное
-                //    зрение оператора: состояние без чтения нижней панели).
+                // 2) Бейдж режима + таймеры удержания/потери (периферийное
+                // зрение оператора). Нижние углы кадра: верхние заняты OSD
+                // борта. Числа — моноширинные с фиксированным форматом
+                // ({:>5.1}): ширина бейджа постоянна, бокс не дёргается
+                // при смене цифр (рост только на 16.7-й минуте удержания).
+                let prop22 = || egui::FontId::proportional(22.0);
+                let mono20 = || egui::FontId::monospace(20.0);
+                let mode_job = |label: &str, secs: f32, col: Color32| {
+                    job(&[
+                        (format!("{label} · "), prop22(), col),
+                        (format!("{secs:>5.1}"), mono20(), col),
+                        (" с".into(), prop22(), col),
+                    ])
+                };
                 let (mcol, text) = match status.as_ref().map(|s| s.mode.as_str()) {
                     Some("TRACK") => (
-                        Color32::from_rgb(60, 220, 90),
-                        format!(
-                            "TRACK · {:.1} с",
-                            self.mode_since.elapsed().as_secs_f32()
-                        ),
+                        TRACK_GREEN,
+                        mode_job("TRACK", self.mode_since.elapsed().as_secs_f32(), TRACK_GREEN),
                     ),
                     Some("ACQUIRE") => (
-                        Color32::from_rgb(80, 200, 255),
-                        format!(
-                            "ACQUIRE · {:.1} с",
-                            self.mode_since.elapsed().as_secs_f32()
+                        ACQUIRE_BLUE,
+                        mode_job(
+                            "ACQUIRE",
+                            self.mode_since.elapsed().as_secs_f32(),
+                            ACQUIRE_BLUE,
                         ),
                     ),
                     Some("LOST") => {
@@ -827,25 +899,36 @@ impl eframe::App for OperatorApp {
                             .lost_since
                             .map(|i| i.elapsed().as_secs_f32())
                             .unwrap_or(0.0);
-                        (Color32::from_rgb(255, 90, 90), format!("ПОТЕРЯН · {t:.1} с"))
+                        (LOST_RED, mode_job("ПОТЕРЯН", t, LOST_RED))
                     }
-                    Some("IDLE") => (Color32::from_rgb(160, 160, 160), "ЗАХВАТ СНЯТ".into()),
-                    _ => (Color32::from_rgb(160, 160, 160), "нет данных".into()),
+                    Some("IDLE") => (
+                        Color32::from_rgb(160, 160, 160),
+                        job(&[("ЗАХВАТ СНЯТ".into(), prop22(), Color32::from_rgb(160, 160, 160))]),
+                    ),
+                    _ => (
+                        Color32::from_rgb(160, 160, 160),
+                        job(&[("нет данных".into(), prop22(), Color32::from_rgb(160, 160, 160))]),
+                    ),
                 };
-                let anchor = vrect.left_top() + Vec2::new(10.0, 10.0);
-                let badge = |anchor: Pos2, text: String, col: Color32, size: f32| {
-                    let align = if anchor.x > vrect.center().x {
-                        egui::Align2::RIGHT_TOP
-                    } else {
-                        egui::Align2::LEFT_TOP
-                    };
-                    let tr = ui.painter().text(
-                        anchor,
-                        align,
-                        text.clone(),
-                        egui::FontId::proportional(size),
-                        col,
-                    );
+                let anchor = vrect.left_bottom() + Vec2::new(10.0, -10.0);
+                // min_w — зарезервированная ширина бокса (по максимуму):
+                // содержимое не растягивает/не сжимает рамку.
+                let badge = |anchor: Pos2,
+                             align: egui::Align2,
+                             text: egui::text::LayoutJob,
+                             col: Color32,
+                             min_w: f32| {
+                    let galley = ui.painter().layout_job(text);
+                    let mut tr = align.anchor_size(anchor, galley.size());
+                    if tr.width() < min_w {
+                        let d = min_w - tr.width();
+                        // расширяем в сторону свободного края (якорь на месте)
+                        if align == egui::Align2::LEFT_BOTTOM {
+                            tr.max.x += d;
+                        } else {
+                            tr.min.x -= d;
+                        }
+                    }
                     ui.painter().rect_filled(
                         tr.expand(6.0),
                         4.0,
@@ -853,48 +936,55 @@ impl eframe::App for OperatorApp {
                     );
                     ui.painter()
                         .rect_stroke(tr.expand(6.0), 4.0, Stroke::new(1.5_f32, col));
-                    ui.painter().text(
-                        anchor,
-                        align,
-                        text,
-                        egui::FontId::proportional(size),
-                        col,
-                    );
+                    ui.painter().galley(tr.min, galley, col);
                     tr
                 };
-                let tr_mode = badge(anchor, text, mcol, 22.0);
+                let tr_mode = badge(anchor, egui::Align2::LEFT_BOTTOM, text, mcol, 0.0);
 
-                // 2б) Индикатор зума (только когда включён).
+                // 2в) Индикатор зума (только когда включён) — правый нижний.
                 if self.zoom > 1.01 {
                     badge(
-                        vrect.right_top() + Vec2::new(-10.0, 10.0),
-                        format!("×{:.1}", self.zoom),
+                        vrect.right_bottom() + Vec2::new(-10.0, -10.0),
+                        egui::Align2::RIGHT_BOTTOM,
+                        job(&[(
+                            format!("×{:.1}", self.zoom),
+                            egui::FontId::proportional(18.0),
+                            cyan,
+                        )]),
                         cyan,
-                        18.0,
+                        0.0,
                     );
                 }
 
-                // 3) REC-таймер под бейджем режима.
+                // 3) REC-таймер НАД бейджем режима (стек снизу-слева).
+                // Точка НЕ убирается (иначе бокс прыгает каждые полсекунды) —
+                // мигает ЦВЕТОМ; таймер моноширинный; ширина бейджа
+                // зарезервирована по «● REC 888:88» — бокс неподвижен.
                 if let Some(rs) = self.rec_since {
                     let blink = (egui_t * 2.0).fract() < 0.65;
                     let e = rs.elapsed().as_secs();
-                    let dot = if blink { "● " } else { "  " };
+                    let dot_col = if blink { REC_RED } else { Color32::TRANSPARENT };
+                    let text = job(&[
+                        ("● ".into(), egui::FontId::proportional(18.0), dot_col),
+                        (
+                            format!("REC {:02}:{:02}", (e / 60) % 100, e % 60),
+                            egui::FontId::monospace(16.0),
+                            REC_RED,
+                        ),
+                    ]);
                     badge(
-                        anchor + Vec2::new(0.0, tr_mode.height() + 18.0),
-                        format!("{dot}REC {:02}:{:02}", e / 60, e % 60),
-                        Color32::from_rgb(255, 80, 80),
-                        18.0,
+                        anchor + Vec2::new(0.0, -(tr_mode.height() + 8.0)),
+                        egui::Align2::LEFT_BOTTOM,
+                        text,
+                        REC_RED,
+                        self.rec_badge_w,
                     );
                 }
 
                 // 4) АРМ: рамка кадра + плашка (видно боковым зрением).
                 if status.as_ref().is_some_and(|s| s.armed) {
                     let blink = (egui_t * 2.0).fract() < 0.6;
-                    let red = if blink {
-                        Color32::from_rgb(220, 40, 40)
-                    } else {
-                        Color32::from_rgb(150, 26, 26)
-                    };
+                    let red = if blink { ARM_RED } else { ARM_RED_DIM };
                     ui.painter()
                         .rect_stroke(vrect.shrink(3.0), 2.0, Stroke::new(6.0_f32, red));
                     let a3 = vrect.center_top() + Vec2::new(0.0, 26.0);
@@ -908,7 +998,13 @@ impl eframe::App for OperatorApp {
                     ui.painter().rect_filled(
                         tr3.expand(9.0),
                         4.0,
-                        Color32::from_rgba_premultiplied(150, 25, 25, 235),
+                        // полупрозрачный ARM_PLAQUE (тест ищет именно 150,25,25)
+                        Color32::from_rgba_premultiplied(
+                            ARM_PLAQUE.r(),
+                            ARM_PLAQUE.g(),
+                            ARM_PLAQUE.b(),
+                            235,
+                        ),
                     );
                     ui.painter().text(
                         a3,
@@ -981,13 +1077,49 @@ fn open_in_explorer(path: &std::path::Path) {
 }
 
 fn dot(ui: &mut egui::Ui, ok: bool, label: &str) {
-    let col = if ok {
-        Color32::from_rgb(60, 220, 90)
-    } else {
-        Color32::from_rgb(255, 90, 90)
-    };
+    let col = if ok { TRACK_GREEN } else { LOST_RED };
     let (pos, _) = ui.allocate_exact_size(egui::vec2(10.0, 10.0), Sense::hover());
     ui.painter()
         .circle_filled(pos.center(), 5.0, col);
     ui.label(label).on_hover_text(if ok { "подключено" } else { "нет связи" });
+}
+
+/// Текст из сегментов с разными шрифтами: подписи — пропорциональный
+/// шрифт, ЧИСЛА — моноширинный: любая комбинация цифр одной длины даёт
+/// одну и ту же ширину, счётчики не «дёргают» бокс.
+fn job(segments: &[(String, egui::FontId, Color32)]) -> egui::text::LayoutJob {
+    let mut j = egui::text::LayoutJob::default();
+    for (text, id, col) in segments {
+        j.append(text, 0.0, egui::TextFormat::simple(id.clone(), *col));
+    }
+    j
+}
+
+/// Метка кнопки записи: таймер и размер моноширинные, размер — формат
+/// фиксированной ширины ({:>5.1}, после 999.9 МБ → ГБ), минуты — резерв
+/// до 999:59. Кнопка НЕ меняет ширину ни с ростом счётчиков, ни при
+/// переключении СТОП ↔ ЗАПИСЬ (соседи сверху не прыгают).
+fn rec_stop_label(secs: u64, bytes: u64) -> egui::text::LayoutJob {
+    let (mm, ss) = (secs / 60, secs % 60);
+    let mb = bytes as f32 / 1e6;
+    let (val, unit) = if mb < 1000.0 {
+        (mb, "МБ")
+    } else {
+        (bytes as f32 / 1e9, "ГБ")
+    };
+    let bold = egui::FontId::new(14.0, egui::FontFamily::Name(style::BOLD_FAMILY.into()));
+    let mono = egui::FontId::monospace(13.0);
+    let b = |t: &str| (t.to_string(), bold.clone(), TEXT);
+    let m = |t: String| (t, mono.clone(), TEXT);
+    job(&[
+        b("■ СТОП · "),
+        m(format!("{mm:02}:{ss:02}")),
+        b(" · "),
+        m(format!("{val:>5.1} {unit}")),
+    ])
+}
+
+/// Максимальная метка кнопки записи (для измерения резерва ширины).
+fn rec_stop_label_max() -> egui::text::LayoutJob {
+    rec_stop_label(999 * 60 + 59, 999_900_000)
 }
