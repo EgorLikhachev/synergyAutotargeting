@@ -4,8 +4,10 @@
 //! tracker_nano.cpp,OpenCV 4.x; сам он — адаптация NanoTrack от HonglinChu).
 //! Числовой паритет важен: референс — OpenCV-реализация, обкатанная в поле.
 //!
-//! Сохранена даже особенность оригинала: в scale-penalty используется
-//! sizeCal(targetPos) — позиция цели вместо размера (см. update()).
+//! Единственное сознательное отклонение от референса: scale-penalty считается
+//! от РАЗМЕРА цели (sizeCal(targetSz), каноничный NanoTrack), а не от позиции.
+//! sizeCal(targetPos) в OpenCV-порте поощряет крупные предсказания, и рамка
+//! монотонно растёт до краёв кадра (ADR-027).
 //!
 //! Модели: nanotrack_backbone_sim.onnx + nanotrack_head_sim.onnx (origin —
 //! OpenCV Zoo). template 127×127, search 255×255, scoreSize 16.
@@ -155,6 +157,8 @@ impl NanoTracker {
         };
 
         let target_sz_sum = self.target_sz[0] + self.target_sz[1];
+        // Размер до обновления (пиксели кадра) — база защитного клампа роста.
+        let (prev_w, prev_h) = (self.target_sz[0], self.target_sz[1]);
         let wc = self.target_sz[0] + self.cfg.context_amount * target_sz_sum;
         let hc = self.target_sz[1] + self.cfg.context_amount * target_sz_sum;
         let sz = (wc * hc).sqrt();
@@ -206,10 +210,13 @@ impl NanoTracker {
             pred_y2[i] = self.grid_y[i] + by1;
         }
 
-        // === Пенальти (дословно из OpenCV-порта) ===
-        // scale penalty; ВНИМАНИЕ: оригинал делит на sizeCal(targetPos) —
-        // особенность OpenCV-порта, сохраняем для числового паритета с полевым референсом.
-        let sc_denom = size_cal(self.target_pos[0], self.target_pos[1]);
+        // === Пенальти ===
+        // scale penalty: каноничная формула NanoTrack — от размера цели
+        // (target_sz здесь уже в масштабе шаблона). Делитель sizeCal(targetPos)
+        // из OpenCV-порта — позиция вместо размера — во всём рабочем диапазоне
+        // занижает штраф для крупных предсказаний, и EMA раздувает рамку
+        // до краёв кадра (ADR-027).
+        let sc_denom = size_cal(self.target_sz[0], self.target_sz[1]);
         let mut sc = vec![0f32; ss * ss];
         for i in 0..ss * ss {
             let v = size_cal(pred_x2[i] - pred_x1[i], pred_y2[i] - pred_y1[i]) / sc_denom;
@@ -267,6 +274,14 @@ impl NanoTracker {
         let mut res_y = self.target_pos[1] + diff_ys;
         let mut res_w = pred_w * lr + (1.0 - lr) * self.target_sz[0];
         let mut res_h = pred_h * lr + (1.0 - lr) * self.target_sz[1];
+
+        // Защитный кламп: не более ±(20% + 3 px) размера за кадр. Разовый
+        // выброс сети не раздувает search-окно (рост окна = фон в кропе);
+        // абсолютный допуск 3 px не душит мелкие цели 7–30 px (ADR-027).
+        let max_dw = prev_w * 0.2 + 3.0;
+        let max_dh = prev_h * 0.2 + 3.0;
+        res_w = res_w.clamp(prev_w - max_dw, prev_w + max_dw);
+        res_h = res_h.clamp(prev_h - max_dh, prev_h + max_dh);
 
         let (img_w, img_h) = (self.img_size.0 as f32, self.img_size.1 as f32);
         res_x = res_x.clamp(0.0, img_w);
@@ -370,6 +385,135 @@ mod tests {
         // Центр сетки = INSTANCE_SIZE/2 со сдвигом полклетки:
         // минимальная координата = (0-8)*16 + 127.5 = -0.5
         assert!((t.grid_x[0] + 0.5).abs() < 1e-4, "grid_x[0]={}", t.grid_x[0]);
+    }
+
+    // === Тесты масштабного скоринга на mock-бэкенде (без моделей) ===
+    //
+    // Сценарий роста рамки: две клетки с почти равным score — центр (136)
+    // предсказывает размер цели, соседняя (137) — двойной. Баг OpenCV-порта
+    // (size_cal(target_pos) в делителе) занижает штраф крупного бокса, и
+    // аргмакс уходит на него — EMA раздувает рамку. Каноничный penalty
+    // удерживает выбор на размере цели.
+
+    /// Mock-бэкенд: cls-пик на клетках 136/137, боксы центрированы на клетках.
+    struct MockNets {
+        /// Размер цели в масштабе шаблона (после init 60×80).
+        tw: f32,
+        th: f32,
+        /// Множитель предсказанного размера клетки 137.
+        size_mult: f32,
+        /// Логит «объект» для клеток 136 (центр) и 137 (соседняя).
+        center_logit: f32,
+        large_logit: f32,
+    }
+
+    impl MockNets {
+        /// score(center)≈0.88, score(large)≈0.90 — почти равные кандидаты.
+        fn tied() -> Self {
+            Self::with_logits(2.0, 2.2)
+        }
+
+        /// Уверенный крупный бокс (score≈0.99) — скоринг не ему принадлежит.
+        fn confident_large() -> Self {
+            Self::with_logits(-2.2, 4.6)
+        }
+
+        fn with_logits(center_logit: f32, large_logit: f32) -> Self {
+            // init 60×80: sz = sqrt(130·150), target_sz шаблона = 60/80 · scale_z.
+            let sz = (130.0f32 * 150.0).sqrt();
+            let scale_z = 127.0 / sz;
+            Self {
+                tw: 60.0 * scale_z,
+                th: 80.0 * scale_z,
+                size_mult: 2.0,
+                center_logit,
+                large_logit,
+            }
+        }
+
+        fn frame() -> Img<'static> {
+            Img::new(vec![128u8; 640 * 480 * 3], 640, 480)
+        }
+    }
+
+    impl TrackerNets for MockNets {
+        fn run_backbone_z(&mut self, _crop: &Img) -> NanoResult<Vec<f32>> {
+            Ok(vec![0.0; 8])
+        }
+        fn run_backbone_x(&mut self, _crop: &Img) -> NanoResult<Vec<f32>> {
+            Ok(vec![0.0; 8])
+        }
+        fn run_head(&mut self, _zf: &[f32], _xf: &[f32]) -> NanoResult<(Vec<f32>, Vec<f32>)> {
+            const SS: usize = 16;
+            let n = SS * SS;
+            let mut cls = vec![0f32; 2 * n];
+            let mut pred = vec![0f32; 4 * n];
+            for i in 0..n {
+                cls[n + i] = if i == 136 {
+                    self.center_logit
+                } else if i == 137 {
+                    self.large_logit
+                } else {
+                    -2.2
+                };
+                let m = if i == 137 { self.size_mult } else { 1.0 };
+                pred[i] = self.tw * m * 0.5;
+                pred[n + i] = self.th * m * 0.5;
+                pred[2 * n + i] = self.tw * m * 0.5;
+                pred[3 * n + i] = self.th * m * 0.5;
+            }
+            Ok((cls, pred))
+        }
+    }
+
+    fn mock_tracker(nets: MockNets) -> NanoTracker {
+        let mut t = NanoTracker::with_nets(Box::new(nets)).unwrap();
+        t.init(&MockNets::frame(), BBox::new(290.0, 200.0, 60.0, 80.0))
+            .unwrap();
+        t
+    }
+
+    #[test]
+    fn scale_penalty_keeps_bbox_at_target_size() {
+        let mut t = mock_tracker(MockNets::tied());
+        let frame = MockNets::frame();
+        let mut last = BBox::new(0.0, 0.0, 0.0, 0.0);
+        for _ in 0..60 {
+            last = t.update(&frame).unwrap();
+        }
+        // Рамка не раздувается (крупный кандидат с чуть большим score
+        // отброшен штрафом масштаба) и не схлопывается.
+        assert!(
+            last.w <= 60.0 * 1.25 && last.w >= 60.0 * 0.8,
+            "w={last:.1}",
+            last = last.w
+        );
+        assert!(
+            last.h <= 80.0 * 1.25 && last.h >= 80.0 * 0.8,
+            "h={last:.1}",
+            last = last.h
+        );
+    }
+
+    #[test]
+    fn bbox_growth_clamped_per_frame() {
+        // Сеть уверенно требует двойной размер каждый кадр — даже тогда
+        // рамка не может вырасти больше чем на 20%+3px за кадр.
+        let mut t = mock_tracker(MockNets::confident_large());
+        let frame = MockNets::frame();
+        let mut prev_w = 60.0f32;
+        let mut last = BBox::new(0.0, 0.0, 0.0, 0.0);
+        for _ in 0..30 {
+            last = t.update(&frame).unwrap();
+            assert!(
+                last.w <= prev_w * 1.2 + 3.0 + 1e-3,
+                "скачок w: {prev_w:.1} -> {last:.1}",
+                last = last.w
+            );
+            prev_w = last.w;
+        }
+        // При этом честное требование сети не блокируется: рамка растёт.
+        assert!(last.w > 70.0, "w={:.1}", last.w);
     }
 
     /// Обёртка для тестов без моделей.

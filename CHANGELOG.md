@@ -6,6 +6,18 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- Tracker bbox no longer inflates frame by frame to the frame edges (the
+  field symptom behind tracker drift): the scale penalty now uses the
+  canonical NanoTrack divisor `sizeCal(targetSz)` (target size in template
+  scale) instead of the OpenCV-port quirk `sizeCal(targetPos)` — position in
+  image pixels — which biased the argmax toward larger predicted boxes and
+  let the size EMA ratchet `target_sz` up every frame (ADR-027). A safety
+  clamp additionally limits per-frame w/h change to ±(20% + 3 px), so a
+  one-off pathological prediction cannot blow up the search window.
+  Covered by mock-backend tests (runaway bbox reproduces on the old
+  formula and is gated by the new one).
+
 ### Changed
 - Control-channel token (ADR-020) ENABLED in production: the board now
   requires `SYNERGY_TOKEN=bench-synergy` (set by dist/operator-ui/
