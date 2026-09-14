@@ -1,9 +1,10 @@
 #!/bin/bash
 # enable_token: включить/сменить/выключить токен канала управления (ADR-020)
 # на борту. Для ретеста заказчиком (Этап 3): пульт запускать через
-# dist/operator-ui/run.bat (он ставит SYNERGY_TOKEN=bench-synergy).
+# dist/operator-ui/run.bat (он ставит SYNERGY_TOKEN из локальных файлов;
+# значение токена в репозитории не хранится).
 #
-# Запуск: ssh radxa@192.168.0.224 'bash ~/synergy/tools/enable_token.sh bench-synergy'
+# Запуск: ssh radxa@192.168.0.224 'bash ~/synergy/tools/enable_token.sh <токен>'
 #   "" (пустой аргумент) = выключить токен.
 #
 # ВНИМАНИЕ: рестартит synergy.service — НЕ запускать во время soak/лёта.

@@ -45,3 +45,6 @@ data/
 # сырые данные R5-сравнения (качаются с борта)
 refvideo/cmp_r5/baseline/
 refvideo/cmp_r5/fixed/
+
+# локальные секреты тест-инструментов (токен канала и т.п.)
+tools/token.local

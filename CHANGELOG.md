@@ -20,8 +20,9 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 - Control-channel token (ADR-020) ENABLED in production: the board now
-  requires `SYNERGY_TOKEN=bench-synergy` (set by dist/operator-ui/
-  run.bat); unauthorized commands are rejected and do not refresh the
+  requires `SYNERGY_TOKEN=<token>` (set by dist/operator-ui/
+  run.bat; the value lives only in local files and is not kept in the
+  repository); unauthorized commands are rejected and do not refresh the
   dead-man timer. Verified end-to-end: without the token an arm command
   is silently dropped (0 accepted, statuses still flow); with it —
   arm → FC rx_ok=true → stop, journal-confirmed. Both UI test suites

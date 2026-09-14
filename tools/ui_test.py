@@ -29,6 +29,19 @@ SHOTS = os.path.join("dist", "operator-ui", "ui_test_shots")
 RECORDS = os.path.join("dist", "operator-ui", "records")
 SUDO = "echo radxa | sudo -S"
 
+
+def synergy_token():
+    """Токен канала (ADR-020): env SYNERGY_TOKEN, иначе gitignored
+    tools/token.local (строка SYNERGY_TOKEN=...). В репозитории значения нет."""
+    tok = os.environ.get("SYNERGY_TOKEN")
+    if not tok:
+        local = os.path.join(os.path.dirname(os.path.abspath(__file__)), "token.local")
+        if os.path.exists(local):
+            for line in open(local, encoding="utf-8"):
+                if line.startswith("SYNERGY_TOKEN="):
+                    tok = line.split("=", 1)[1].strip()
+    return tok or ""
+
 results = []
 
 
@@ -151,7 +164,7 @@ def main():
     # --- 1. Запуск пульта, подключение борта --------------------------------
     subprocess.Popen(
         [UI_EXE], cwd=os.path.dirname(UI_EXE),
-        env=dict(os.environ, SYNERGY_TOKEN=os.environ.get("SYNERGY_TOKEN", "bench-synergy")))
+        env=dict(os.environ, SYNERGY_TOKEN=synergy_token()))
     hwnd = find_window(20)
     check("пульт запущен, окно найдено", bool(hwnd))
     if not hwnd:
@@ -255,7 +268,7 @@ def main():
     marker = board_utc()
     subprocess.Popen(
         [UI_EXE], cwd=os.path.dirname(UI_EXE),
-        env=dict(os.environ, SYNERGY_TOKEN=os.environ.get("SYNERGY_TOKEN", "bench-synergy")))
+        env=dict(os.environ, SYNERGY_TOKEN=synergy_token()))
     hwnd2 = find_window(20)
     line = wait_journal(marker, "[MJPEG-PUSH] подключён", timeout_s=25)
     check("перезапуск пульта → авто-реконнект борта", bool(hwnd2 and line),

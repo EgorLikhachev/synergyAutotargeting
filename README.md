@@ -142,7 +142,8 @@ CLI flags: `--config PATH`, `--synthetic`, `--duration SEC`, `--demo-detect`,
 ## Testing
 
 ```bash
-cargo test --workspace      # 73 unit tests (decoder, PID, MSP, demosaic parity, decode floor…)
+cargo test --workspace      # 76 unit tests (decoder, PID, MSP, demosaic parity, decode floor,
+                            # tracker scale-penalty mock…)
 cargo clippy --workspace    # CI enforces zero warnings
 ```
 
@@ -195,6 +196,7 @@ Released under the [MIT License](LICENSE).
   the MSP/UART aiming protocol
 - **the Rust prototype** — V4L2 capture crate, SDD/ADR documentation practice
 - [OpenCV](https://github.com/opencv/opencv) `TrackerNano` implementation this
-  tracker is ported from
+  tracker is ported from (one upstream bug deliberately fixed: the scale
+  penalty now uses the target size, not its position — ADR-027)
 - [tract](https://github.com/sonos/tract) (pure-Rust ONNX runtime) and
   [rknn-toolkit2](https://github.com/airockchip/rknn-toolkit2)

@@ -24,6 +24,19 @@ UI_EXE = os.path.join("dist", "operator-ui", "operator-ui.exe")
 SHOTS = os.path.join("dist", "operator-ui", "ui_test_shots")
 SUDO = "echo radxa | sudo -S"
 
+
+def synergy_token():
+    """Токен канала (ADR-020): env SYNERGY_TOKEN, иначе gitignored
+    tools/token.local (строка SYNERGY_TOKEN=...). В репозитории значения нет."""
+    tok = os.environ.get("SYNERGY_TOKEN")
+    if not tok:
+        local = os.path.join(os.path.dirname(os.path.abspath(__file__)), "token.local")
+        if os.path.exists(local):
+            for line in open(local, encoding="utf-8"):
+                if line.startswith("SYNERGY_TOKEN="):
+                    tok = line.split("=", 1)[1].strip()
+    return tok or ""
+
 CYAN = (0, 210, 255)
 TOL_GREEN = (40, 255, 120)
 TOL_AMBER = (255, 170, 0)
@@ -149,7 +162,7 @@ def main():
     marker0 = ssh("date -u '+%Y-%m-%d %H:%M:%S'").strip()
     subprocess.Popen(
         [UI_EXE], cwd=os.path.dirname(UI_EXE),
-        env=dict(os.environ, SYNERGY_TOKEN=os.environ.get("SYNERGY_TOKEN", "bench-synergy")))
+        env=dict(os.environ, SYNERGY_TOKEN=synergy_token()))
     hwnd = find_window(20)
     check("окно пульта найдено", bool(hwnd))
     if not hwnd:
